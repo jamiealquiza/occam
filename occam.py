@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-import redis, json, requests, logging, time, multiprocessing
-from threading import Thread
+import redis, json, requests, logging, time, signal, sys, multiprocessing
 
-# General vars.
+# Config vars.
 redis_retry = 10
 redis_host = "127.0.0.1"
 redis_port = 6379
+
+# General vars.
+service_running = True
 checks = open('checks.py').read()
 msgQueue = multiprocessing.Queue()
 
@@ -16,7 +18,6 @@ handler.setLevel(logging.INFO)
 handler.setFormatter(logging.Formatter(fmt='%(asctime)s | %(levelname)s | %(message)s'))
 log.addHandler(handler)
 log.setLevel(logging.INFO)
-
 
 
 url = "https://events.pagerduty.com/generic/2010-04-15/create_event.json"
@@ -50,37 +51,49 @@ def connRedis(r):
             r.ping()
             log.info("Connected to Redis at %s:%d" % (redis_host, redis_port))
             break
-        except:
-            log.warn("Redis unreachable. Retrying in %ds." % redis_retry)
+        except Exception:
+            log.warn("Redis unreachable, retrying in %ds" % redis_retry)
             time.sleep(redis_retry)
 
 def pollRedis():
     r = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
     connRedis(r)
-    # Add try.
-    while True:
+    while service_running:
         pipe = r.pipeline()
         pipe.lrange('messages', 0, 99)
         pipe.ltrim('messages', 100, -1)
-        batch = pipe.execute()[0]
-        if batch:
-            msgQueue.put(batch)
-        else:
-            time.sleep(3)
+        try:
+            batch = pipe.execute()[0]
+            if batch:
+                msgQueue.put(batch)
+            else:
+                time.sleep(3)
+        except Exception:
+            log.warn("Failed to poll Redis")
+            connRedis(r)
 
 def matcher():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     while True:
         batch = msgQueue.get()
         for msg in batch:
             exec(checks)
 
-# use queue
 if __name__ == "__main__":
-    nWorkers = lambda: 1 if multiprocessing.cpu_count() == 1 else max(multiprocessing.cpu_count()-1, 2)
-    workers = [multiprocessing.Process(target=matcher) for x in range(nWorkers())]
+    n = lambda: 1 if multiprocessing.cpu_count() == 1 else max(multiprocessing.cpu_count()-1, 2)
+    workers = [multiprocessing.Process(target=matcher) for x in range(n())]
     for i in workers:
+        i.daemon = True
         i.start()
-    reader = [Thread(target=pollRedis) for x in range(2)]
-    for i in reader:
-        i.start()
-    for i in reader: i.join()
+
+    try:
+        pollRedis()
+    except KeyboardInterrupt:
+        log.info("Stopping workers")
+        service_running = False
+        while True:
+            if not msgQueue.empty():
+                log.info("Waiting for in-flight messages")
+                time.sleep(3)
+            else:
+                sys.exit(0)
