@@ -1,7 +1,7 @@
 occam
 =====
 
-"The fewest assumptions" - A temporary event match service for Langolier.
+"The fewest assumptions" - A temporary JSON event alerting service for Langolier.
 
 ### Overview
 
