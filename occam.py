@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-import redis, json, requests, logging, time, signal, sys, multiprocessing
+import redis, json, requests, logging, time, signal, sys, configparser, multiprocessing
+
+###########
+# CONFIGS #
+###########
 
 # Config vars.
-redis_retry = 10
-redis_host = "127.0.0.1"
-redis_port = 6379
+config = configparser.ConfigParser()
+config.read('config')
+redis_retry = int(config['redis']['retry'])
+redis_host = config['redis']['host']
+redis_port = int(config['redis']['port'])
+pd_service_key = config['pagerduty']['service_key']
+pd_description = config['pagerduty']['description']
 
 # General vars.
 service_running = True
@@ -22,11 +30,15 @@ log.setLevel(logging.INFO)
 # PagerDuty generic API.
 url = "https://events.pagerduty.com/generic/2010-04-15/create_event.json"
 alert = {
-    "service_key": "",
     "event_type": "trigger",
-    "description": "occam",
+    "service_key": pd_service_key,
+    "description": pd_description,
     "details": {}
 }
+
+##################
+# INPUTS/OUTPUTS #
+##################
 
 # Check if message with '@type' of 'type' has 'ref' key-value fields.
 def inMatch(message, key, ref):
@@ -39,15 +51,23 @@ def inMatch(message, key, ref):
 
 # Sent out to PagerDuty.
 def outPd(message):
+    log.info("Event Match: " + message.decode('utf-8'))
     a = alert
     # Append whole message as PD alert details.
     a['details'] = json.loads(message.decode('utf-8'))
     resp = requests.post(url, data=json.dumps(a))
-    log.info("PagerDuty: " + json.dumps(a))
+    if resp.status_code != 200:
+      log.warn("Error sending to PagerDuty: %s" % resp.content.decode('utf-8'))
+    else:
+      log.info("Message sent to PagerDuty: %s" % resp.content.decode('utf-8'))
 
 # Write to console.
 def outConsole(message):
    log.info("Event Match: " + message.decode('utf-8'))
+
+#############
+# INTERNALS #
+#############
 
 # Ensure Redis can be pinged.
 def connRedis(r):
@@ -88,6 +108,10 @@ def matcher():
         batch = msgQueue.get()
         for msg in batch:
             exec(checks)
+
+###########
+# SERVICE #
+###########
 
 if __name__ == "__main__":
     # Start 1 matcher worker if single hw thread,
