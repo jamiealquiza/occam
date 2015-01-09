@@ -17,7 +17,7 @@ pd_description = config['pagerduty']['description']
 # General vars.
 service_running = True
 checks = open('checks.py').read()
-msgQueue = multiprocessing.Queue()
+msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
 
 # Logging config.
 log = logging.getLogger()
