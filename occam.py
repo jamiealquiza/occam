@@ -45,11 +45,19 @@ def inMatch(message, key, ref):
     m = json.loads(message.decode('utf-8'))
     kv = ref.split(':')
     if "@type" in m and m['@type'] == key:
-            if kv[0] in m and m[kv[0]] == kv[1]:
-                return True
+            if kv[0] in m and m[kv[0]] == kv[1]: return True
     return False
 
-# Sent out to PagerDuty.
+# Apply 'regex' against 'field' for message with '@type' of 'key'. 
+def inRegex(message, key, field, regex):
+  m = json.loads(message.decode('utf-8'))
+  r = re.compile(regex)
+  if "@type" in m and m['@type'] == key:
+      if field in m:
+        if re.match(r, m[field]): return True
+  return False
+
+# Send out to PagerDuty.
 def outPd(message):
     log.info("Event Match: " + message.decode('utf-8'))
     a = alert
