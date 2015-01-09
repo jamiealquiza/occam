@@ -44,6 +44,17 @@ A basic equality check. With the input JSON 'msg' where the field '@type' = 'typ
 Python regex (re) matching. With the input JSON 'msg' where the field '@type' = 'type', checks pattern '.*' against the value of 'somefield'.
 <pre>if inRegex(msg, "type", "somefield", ".*")</pre>
 
+#### inRate
+Anchor function that is placed within a series of conditionals that requires a threshold of all preceding conditions to have been met '5' times in '30', otherwise, the chain of conditions will be short-circuited.
+<pre>
+inRate(5, 30)
+</pre>
+In line example:
+<pre>
+if inMatch(msg, "type", "somefield:somevalue") and inRate(5, 30): outConsole(msg)
+</pre>
+
+
 #### outPd
 Writes 'msg' JSON to stdout upon match.
 <pre>outConsole(msg)</pre>
