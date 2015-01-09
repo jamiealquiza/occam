@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import redis, json, requests, logging, time, signal, sys, configparser, multiprocessing
+import redis, json, random, requests, logging, re, time, signal, sys, configparser, multiprocessing
 
 ###########
 # CONFIGS #
@@ -11,13 +11,20 @@ config.read('config')
 redis_retry = int(config['redis']['retry'])
 redis_host = config['redis']['host']
 redis_port = int(config['redis']['port'])
+redis_conn = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
 pd_service_key = config['pagerduty']['service_key']
 pd_description = config['pagerduty']['description']
 
 # General vars.
 service_running = True
-checks = open('checks.py').read()
 msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
+
+# Checks.
+checks = open('checks.py').read()
+while "inRate" in checks: 
+  checks = checks.replace('inRate(', 'checkRate("' + str(random.getrandbits(64)) + '", ', 1)
+
+print(checks)
 
 # Logging config.
 log = logging.getLogger()
@@ -51,13 +58,23 @@ def inMatch(message, key, ref):
 # Apply 'regex' against 'field' for message with '@type' of 'key'. 
 def inRegex(message, key, field, regex):
   m = json.loads(message.decode('utf-8'))
-  r = re.compile(regex)
+  rg = re.compile(regex)
   if "@type" in m and m['@type'] == key:
       if field in m:
-        if re.match(r, m[field]): return True
+        if re.match(rg, m[field]): return True
   return False
 
-# Send out to PagerDuty.
+# Rate check.
+def checkRate(key, threshold, window):
+    expires = time.time() - window
+    redis_conn.zremrangebyscore(key, '-inf', expires)
+    now = time.time()
+    redis_conn.zadd(key, now, now)
+    if redis_conn.zcard(key) >= threshold:
+        return True
+    return False
+
+# Sent out to PagerDuty.
 def outPd(message):
     log.info("Event Match: " + message.decode('utf-8'))
     a = alert
@@ -78,10 +95,10 @@ def outConsole(message):
 #############
 
 # Ensure Redis can be pinged.
-def connRedis(r):
+def connRedis():
     while True:
         try:
-            r.ping()
+            redis_conn.ping()
             log.info("Connected to Redis at %s:%d" % (redis_host, redis_port))
             break
         except Exception:
@@ -90,11 +107,10 @@ def connRedis(r):
 
 # Pops message batches from Redis and enqueues into 'msgQueue'.
 def pollRedis():
-    r = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
-    connRedis(r)
+    connRedis()
     while service_running:
         # Pipeline batches to reduce net latency.
-        pipe = r.pipeline()
+        pipe = redis_conn.pipeline()
         pipe.lrange('messages', 0, 99)
         pipe.ltrim('messages', 100, -1)
         try:
@@ -103,11 +119,11 @@ def pollRedis():
                 msgQueue.put(batch)
             else:
                 # Sleep if Redis list is empty to avoid
-                # burning cycles.
+                # burning cycles. Save money. See world.
                 time.sleep(3)
         except Exception:
             log.warn("Failed to poll Redis")
-            connRedis(r)
+            connRedis(redis_conn)
 
 # Pops batches from 'msgQueue' and iterates through checks.
 def matcher():
