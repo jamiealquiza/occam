@@ -24,8 +24,6 @@ checks = open('checks.py').read()
 while "inRate" in checks: 
   checks = checks.replace('inRate(', 'checkRate("' + str(random.getrandbits(64)) + '", ', 1)
 
-print(checks)
-
 # Logging config.
 log = logging.getLogger()
 handler = logging.StreamHandler()
