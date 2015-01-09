@@ -45,7 +45,7 @@ Python regex (re) matching. With the input JSON 'msg' where the field '@type' = 
 <pre>if inRegex(msg, "type", "somefield", ".*")</pre>
 
 #### inRate
-Anchor function that is placed within a series of conditionals that requires a threshold of all preceding conditions to have been met '5' times in '30', otherwise, the chain of conditions will be short-circuited.
+Anchor function that is placed within a series of conditionals that requires a threshold of all preceding conditions to have been met '5' times in '30' seconds, otherwise, the chain of conditions will be short-circuited.
 <pre>
 inRate(5, 30)
 </pre>
