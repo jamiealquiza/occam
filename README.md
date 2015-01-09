@@ -55,7 +55,7 @@ if inMatch(msg, "type", "somefield:somevalue") and inRate(5, 30): outConsole(msg
 </pre>
 
 
-#### outPd
+#### outConsole
 Writes 'msg' JSON to stdout upon match.
 <pre>outConsole(msg)</pre>
 
