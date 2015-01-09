@@ -34,7 +34,34 @@ The above syntax would trigger a PagerDuty event (appending the 'msg' JSON docum
 
 `checks.py` can contain any number of rules that every message will iterate against.
 
+### Inputs / Outputs
+
+#### inMatch
+A basic equality check. With the input JSON 'msg' where the field '@type' = 'type', check if 'somefield' = 'somevalue'.
+<pre>if inMatch(msg, "type", "somefield:somevalue")</pre>
+
+#### inRegex
+Python regex (re) matching. With the input JSON 'msg' where the field '@type' = 'type', checks pattern '.*' against the value of 'somefield'.
+<pre>if inRegex(msg, "type", "somefield", ".*")</pre>
+
+#### outPd
+Writes 'msg' JSON to stdout upon match.
+<pre>outConsole(msg)</pre>
+
+#### outPd
+Triggers a PagerDuty alert to the specified `service_key` (see `config` file) via the PagerDuty generic API, appending the whole 'msg' JSON output as the PagerDuty alert 'details' body. 
+<pre>outPd(msg)</pre>
+
 ### Performance
 
  + Occam uses Redis as a local queue and is built on Python, inheritely not a very performant language. It's strongly recommended to ensure `hiredis` is installed.
  + All checks in `checks.py` are parallelized 'n' ways if 2 or more hardware threads are available, where 'n' = `max(multiprocessing.cpu_count()-1, 2)`. CPU load depends on complexity / size of checks applied.
+
+### Misc.
+
+Occam attempts to never ditch messages popped from Redis; the reader loop halts on shutdown and workers allow in-flight messages to complete:
+<pre>
+2015-01-09 10:36:42,353 | INFO | Connected to Redis at 127.0.0.1:6379
+^C2015-01-09 10:36:49,211 | INFO | Stopping workers
+2015-01-09 10:36:49,211 | INFO | Waiting for in-flight messages
+</pre>
