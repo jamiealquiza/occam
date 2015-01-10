@@ -5,4 +5,3 @@ port: 6379
 
 [pagerduty]
 service_key: 00000
-description: occam_alerts

@@ -13,7 +13,6 @@ redis_host = config['redis']['host']
 redis_port = int(config['redis']['port'])
 redis_conn = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
 pd_service_key = config['pagerduty']['service_key']
-pd_description = config['pagerduty']['description']
 
 # General vars.
 service_running = True
@@ -21,7 +20,7 @@ msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
 
 # Checks.
 checks = open('checks.py').read()
-while "inRate" in checks: 
+while "inRate" in checks:
   checks = checks.replace('inRate(', 'checkRate("' + str(random.getrandbits(64)) + '", ', 1)
 
 # Logging config.
@@ -37,7 +36,8 @@ url = "https://events.pagerduty.com/generic/2010-04-15/create_event.json"
 alert = {
     "event_type": "trigger",
     "service_key": pd_service_key,
-    "description": pd_description,
+    "description": "",
+    "incident_key": "",
     "details": {}
 }
 
@@ -47,19 +47,17 @@ alert = {
 
 # Check if message with '@type' of 'type' has 'ref' key-value fields.
 def inMatch(message, key, ref):
-    m = json.loads(message.decode('utf-8'))
     kv = ref.split(':')
-    if "@type" in m and m['@type'] == key:
-            if kv[0] in m and m[kv[0]] == kv[1]: return True
+    if "@type" in message and message['@type'] == key:
+            if kv[0] in message and message[kv[0]] == kv[1]: return True
     return False
 
-# Apply 'regex' against 'field' for message with '@type' of 'key'. 
+# Apply 'regex' against 'field' for message with '@type' of 'key'.
 def inRegex(message, key, field, regex):
-  m = json.loads(message.decode('utf-8'))
   rg = re.compile(regex)
-  if "@type" in m and m['@type'] == key:
+  if "@type" in message and message['@type'] == key:
       if field in m:
-        if re.match(rg, m[field]): return True
+        if re.match(rg, message[field]): return True
   return False
 
 # Rate check.
@@ -73,11 +71,17 @@ def checkRate(key, threshold, window):
     return False
 
 # Sent out to PagerDuty.
-def outPd(message):
-    log.info("Event Match: " + message.decode('utf-8'))
+def outPd(message, incident_key=None):
+    log.info("Event Match: %s" % message)
     a = alert
     # Append whole message as PD alert details.
-    a['details'] = json.loads(message.decode('utf-8'))
+    a['details'] = json.dumps(message)
+    # Create incident_key if provided.
+    if incident_key:
+      a['incident_key'] = a['description'] = incident_key
+    else:
+      a['description'] = "occam_alert"
+    # Ship.
     resp = requests.post(url, data=json.dumps(a))
     if resp.status_code != 200:
       log.warn("Error sending to PagerDuty: %s" % resp.content.decode('utf-8'))
@@ -86,7 +90,7 @@ def outPd(message):
 
 # Write to console.
 def outConsole(message):
-   log.info("Event Match: " + message.decode('utf-8'))
+   log.info("Event Match: %s" % message)
 
 #############
 # INTERNALS #
@@ -128,8 +132,9 @@ def matcher():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     while True:
         batch = msgQueue.get()
-        for msg in batch:
-            exec(checks)
+        for m in batch:
+          msg = json.loads(m.decode('utf-8'))
+          exec(checks)
 
 ###########
 # SERVICE #

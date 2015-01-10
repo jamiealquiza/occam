@@ -17,7 +17,7 @@ A matching message pushed into the reference Redis list:
 </pre>
 And Occam started, yielding the match:
 <pre>
-% ./occam.py 
+% ./occam.py
 2014-12-23 19:05:15,549 | INFO | Connected to Redis at 127.0.0.1:6379
 2014-12-23 19:05:36,576 | INFO | Event Match: { "@type": "type", "somefield": "someval" }
 </pre>
@@ -60,8 +60,20 @@ Writes 'msg' JSON to stdout upon match.
 <pre>outConsole(msg)</pre>
 
 #### outPd
-Triggers a PagerDuty alert to the specified `service_key` (see `config` file) via the PagerDuty generic API, appending the whole 'msg' JSON output as the PagerDuty alert 'details' body. 
-<pre>outPd(msg)</pre>
+Triggers a PagerDuty alert to the specified `service_key` (see `config` file) via the PagerDuty generic API, appending the whole 'msg' JSON output as the PagerDuty alert 'details' body. An [incident_key](https://developer.pagerduty.com/documentation/integration/events/trigger) and PagerDuty alert description is automatically generated unless specified as a second parameter:
+<pre>outPd(msg, "web01-alerts")</pre>
+It's also valid to use a portion of the message body to dynamically generate an incident key:
+<pre>outPd(msg, msg['hostname'])</pre>
+As well as a combination of a fixed string and unique message data:
+<pre>outPd(msg, msg['somefield'] + " High Load")</pre>
+Yielding:
+<pre>
+% ./occam.py
+2015-01-10 09:44:25,592 | INFO | Connected to Redis at 127.0.0.1:6379
+2015-01-10 09:44:31,611 | INFO | Event Match: {'somefield': 'somevalue', '@type': 'type'}
+2015-01-10 09:44:31,622 | INFO | Starting new HTTPS connection (1): events.pagerduty.com
+2015-01-10 09:44:32,617 | INFO | Message sent to PagerDuty: {"status":"success","message":"Event processed","incident_key":"somevalue High Load"}
+</pre>
 
 ### Performance
 
