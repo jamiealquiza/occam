@@ -1,36 +1,44 @@
 occam
 =====
 
-"The fewest assumptions" -A simple alerting service for JSON messages.
+"The fewest assumptions" - A simple matching / alerting service for JSON messages.
 
 ### Overview
 
-Occam is a simple event matching service that allows you to write JSON message matching -> action logic using a simple, declarative Python syntax that is automatically parallelized under the hood.
+Occam is a simple event matching service that allows you to write JSON message matching -> action logic using a simple, declarative Python syntax that is automatically parallelized under the hood. Messages are read from a Redis list, populated by any means of choice.
 
 The following in `checks.py` would look for a message with an '@type' field with the value 'type', then return whether or not 'somefield' exists and equals 'someval':
 <pre>
 if inMatch(msg, "type", "somefield:someval"): outConsole(msg)
 </pre>
-A matching message pushed into the reference Redis list:
+A message pushed into the reference Redis list:
 <pre>
 % redis-cli lpush messages '{ "@type": "type", "somefield": "someval" }'
 </pre>
-And Occam started, yielding the match:
+Then Occam started, yielding the match:
 <pre>
 % ./occam.py
 2014-12-23 19:05:15,549 | INFO | Connected to Redis at 127.0.0.1:6379
 2014-12-23 19:05:36,576 | INFO | Event Match: { "@type": "type", "somefield": "someval" }
 </pre>
 
-Matching syntax can be nested to require additional conditions met to be considered a match or to trigger different actions depending on the number of conditions met:
+Matching syntax can be nested and chained to require additional conditions:
 <pre>
 if inMatch(msg, "type", "somefield:someval"):
-  if inMatch(msg, "type", "anotherfield:anotherval"
-    outPd(msg)
-  else:
+  if inMatch(msg, "type", "anotherfield:anotherval"):
     outConsole(msg)
 </pre>
-The above syntax would trigger a PagerDuty event (appending the 'msg' JSON document) if both 'somefield' and 'anotherfield' values were matched, but log to console if only 'somefield' was matched.
+The above syntax would console log the event (appending the 'msg' JSON document) if both 'somefield' and 'anotherfield' values were matched according to the checks syntax.
+
+More complex logic can be formed, such as sub-sampling and different output actions at each level of conditions met:
+<pre>
+if inMatch(msg, "type", "somefield:someval") and inRate(5, 60):
+  if inMatch(msg, "type", "anotherfield:anotherval") and inRate(10, 30):
+      outPd(msg)
+  else:
+      outConsole(msg)
+</pre>
+The above syntax would write the message to console if >= 5 'somefield' = 'someval' matches were observed within a rolling 60 second window. If we were to exceed this threshold with say 35 matching events and >= 10 of those 35 events also held 'anotherfield' with the value 'anotherval' within a 30 second rolling window, we would trigger a PagerDuty alert (appending the message data - see 'Inputs/Outputs' section).
 
 `checks.py` can contain any number of rules that every message will iterate against.
 
@@ -75,6 +83,15 @@ Yielding:
 2015-01-10 09:44:32,617 | INFO | Message sent to PagerDuty: {"status":"success","message":"Event processed","incident_key":"somevalue High Load"}
 </pre>
 
+#### outHipChat
+Pending.
+
+### outEmail
+Pending.
+
+### outAscender
+Pending.
+
 ### Performance
 
  + Occam uses Redis as a local queue and is built on Python, inheritely not a very performant language. It's strongly recommended to ensure `hiredis` is installed.
@@ -88,3 +105,6 @@ Occam attempts to never ditch messages popped from Redis; the reader loop halts 
 ^C2015-01-09 10:36:49,211 | INFO | Stopping workers
 2015-01-09 10:36:49,211 | INFO | Waiting for in-flight messages
 </pre>
+
+### Pending
+Lots more inputs/outputs; see open issues.
