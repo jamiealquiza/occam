@@ -83,8 +83,16 @@ Yielding:
 2015-01-10 09:44:32,617 | INFO | Message sent to PagerDuty: {"status":"success","message":"Event processed","incident_key":"somevalue High Load"}
 </pre>
 
-#### outHipChat
-Pending.
+#### outHc
+Sends a [room notification](https://www.hipchat.com/docs/apiv2/method/send_room_notification) to HipChat via the [v2 REST API](https://www.hipchat.com/docs/apiv2/auth) via a room ID and token. The room ID and token pair is referenced by an alias defined in the `config` file, with an underscore delimited <id>_<token> value:
+<pre>
+[hipchat]
+test-room: 000000_00000000000000000000
+</pre>
+An alert output (in `checks.py`) configured to send a message to the corresponding HipChat room configuration:
+<pre>
+if inMatch(msg, "type", "somefield:somevalue"): outHc(msg, "test-room")
+</pre>
 
 ### outEmail
 Pending.
