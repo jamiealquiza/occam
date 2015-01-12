@@ -5,3 +5,6 @@ port: 6379
 
 [pagerduty]
 service_key: 00000
+
+[hipchat]
+room-alias: 000000_00000000000000000000

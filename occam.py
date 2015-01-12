@@ -1,4 +1,48 @@
 #!/usr/bin/env python3
+
+# The MIT License (MIT)
+#
+# Copyright (c) 2015 Jamie Alquiza
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+# The MIT License (MIT)
+#
+# Copyright (c) 2014 Jamie Alquiza
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 import redis, json, random, requests, logging, re, time, signal, sys, configparser, multiprocessing
 
 ###########
@@ -20,7 +64,7 @@ msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
 
 # Checks.
 checks = open('checks.py').read()
-while "inRate" in checks:
+while "inRate" in checks: 
   checks = checks.replace('inRate(', 'checkRate("' + str(random.getrandbits(64)) + '", ', 1)
 
 # Logging config.
@@ -31,37 +75,28 @@ handler.setFormatter(logging.Formatter(fmt='%(asctime)s | %(levelname)s | %(mess
 log.addHandler(handler)
 log.setLevel(logging.INFO)
 
-# PagerDuty generic API.
-url = "https://events.pagerduty.com/generic/2010-04-15/create_event.json"
-alert = {
-    "event_type": "trigger",
-    "service_key": pd_service_key,
-    "description": "",
-    "incident_key": "",
-    "details": {}
-}
 
-##################
-# INPUTS/OUTPUTS #
-##################
+##########
+# INPUTS #
+##########
 
-# Check if message with '@type' of 'type' has 'ref' key-value fields.
 def inMatch(message, key, ref):
+    """Check if message with '@type' of 'type' has 'ref' key-value fields."""
     kv = ref.split(':')
     if "@type" in message and message['@type'] == key:
             if kv[0] in message and message[kv[0]] == kv[1]: return True
     return False
 
-# Apply 'regex' against 'field' for message with '@type' of 'key'.
 def inRegex(message, key, field, regex):
-  rg = re.compile(regex)
-  if "@type" in message and message['@type'] == key:
-      if field in m:
-        if re.match(rg, message[field]): return True
-  return False
+    """Apply 'regex' against 'field' for message with '@type' of 'key'."""
+    rg = re.compile(regex)
+    if "@type" in message and message['@type'] == key:
+        if field in m:
+          if re.match(rg, message[field]): return True
+    return False
 
-# Rate check.
 def checkRate(key, threshold, window):
+    """Rate check."""
     expires = time.time() - window
     redis_conn.zremrangebyscore(key, '-inf', expires)
     now = time.time()
@@ -70,27 +105,58 @@ def checkRate(key, threshold, window):
         return True
     return False
 
-# Sent out to PagerDuty.
-def outPd(message, incident_key=None):
+
+###########
+# OUTPUTS #
+###########
+
+def outConsole(message):
+    """Writes to console."""
     log.info("Event Match: %s" % message)
-    a = alert
+
+def outPd(message, incident_key=None):
+    """Writes to PagerDuty."""
+    log.info("Event Match: %s" % message)
+
+    url = "https://events.pagerduty.com/generic/2010-04-15/create_event.json"
+    alert = {
+      "event_type": "trigger",
+      "service_key": pd_service_key,
+      "description": "occam_alert",
+      "incident_key": "",
+      "details": {}
+    }
+
     # Append whole message as PD alert details.
     a['details'] = json.dumps(message)
+
     # Create incident_key if provided.
-    if incident_key:
-      a['incident_key'] = a['description'] = incident_key
-    else:
-      a['description'] = "occam_alert"
+    if incident_key: alert['incident_key'] = alert['description'] = incident_key
+
     # Ship.
-    resp = requests.post(url, data=json.dumps(a))
+    resp = requests.post(url, data=json.dumps(alert))
     if resp.status_code != 200:
       log.warn("Error sending to PagerDuty: %s" % resp.content.decode('utf-8'))
     else:
       log.info("Message sent to PagerDuty: %s" % resp.content.decode('utf-8'))
 
-# Write to console.
-def outConsole(message):
-   log.info("Event Match: %s" % message)
+def outHc(message, hc_meta):
+    """Writes to HipChat."""
+    log.info("Event Match: %s" % message)
+
+    hc = config['hipchat'][hc_meta].split("_")
+    url = "https://api.hipchat.com/v2/room/" + hc[0] + "/notification"
+
+    # Ship.
+    resp = requests.post(url,
+      data='{ "message": "' + str(message) + '", "message_format": "html" }',
+      params={'auth_token': hc[1]},
+      headers={'content-type': 'application/json'})
+    if resp.status_code != (200|204):
+      log.warn("Error sending to HipChat: %s" % resp.content.decode('utf-8'))
+    else:
+      log.info("Message sent to HipChat")
+
 
 #############
 # INTERNALS #
@@ -135,6 +201,7 @@ def matcher():
         for m in batch:
           msg = json.loads(m.decode('utf-8'))
           exec(checks)
+
 
 ###########
 # SERVICE #
