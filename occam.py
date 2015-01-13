@@ -147,9 +147,13 @@ def outHc(message, hc_meta):
     hc = config['hipchat'][hc_meta].split("_")
     url = "https://api.hipchat.com/v2/room/" + hc[0] + "/notification"
 
+    notification = {
+      "message": "<b>Occam Alert</b><br>" + json.dumps(message), 
+      "message_format": "html"
+    }
     # Ship.
     resp = requests.post(url,
-      data='{ "message": "' + str(message) + '", "message_format": "html" }',
+      data=json.dumps(notification),
       params={'auth_token': hc[1]},
       headers={'content-type': 'application/json'})
     if resp.status_code != (200|204):
