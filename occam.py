@@ -91,8 +91,8 @@ def inRegex(message, key, field, regex):
     """Apply 'regex' against 'field' for message with '@type' of 'key'."""
     rg = re.compile(regex)
     if "@type" in message and message['@type'] == key:
-        if field in m:
-          if re.match(rg, message[field]): return True
+        if field in message:
+          if re.search(rg, message[field]): return True
     return False
 
 def checkRate(key, threshold, window):
