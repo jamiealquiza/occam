@@ -128,7 +128,7 @@ def outPd(message, incident_key=None):
     }
 
     # Append whole message as PD alert details.
-    a['details'] = json.dumps(message)
+    alert['details'] = json.dumps(message)
 
     # Create incident_key if provided.
     if incident_key: alert['incident_key'] = alert['description'] = incident_key
