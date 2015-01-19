@@ -105,6 +105,34 @@ Pending.
  + Occam uses Redis as a local queue and is built on Python, inheritely not a very performant language. It's strongly recommended to ensure `hiredis` is installed.
  + All checks in `checks.py` are parallelized 'n' ways if 2 or more hardware threads are available, where 'n' = `max(multiprocessing.cpu_count()-1, 2)`. CPU load depends on complexity / size of checks applied.
 
+### Outage API
+Note: work in progress.
+
+The Outage API allows you to maintain a global map of key-value data that all messages are checked against and dropped before any checks are ran. Blacklisting works as follows:
+<pre>
+% curl localhost:8080/outage -XPOST -d 'somefield:somevalue:2'
+% curl localhost:8080/outage -XPOST -d 'some:anothervalue:6'
+</pre>
+
+Occam propagating the rules to all workers running checks:
+<pre>
+/occam.py 
+2015-01-19 15:51:21,905 | INFO | API - Listening at 0.0.0.0:8080
+2015-01-19 15:51:21,906 | INFO | Connected to Redis at 127.0.0.1:6379
+2015-01-19 15:51:28,609 | INFO | API - Outage Request: where 'somefield' == 'somevalue' for 2 hour(s)
+2015-01-19 15:51:33,907 | INFO | Worker-0 - Blacklist Rules Updated: {"somefield": ["somevalue"]}
+2015-01-19 15:51:33,909 | INFO | Worker-1 - Blacklist Rules Updated: {"somefield": ["somevalue"]}
+2015-01-19 15:51:50,821 | INFO | API - Outage Request: where 'somefield' == 'anothervalue' for 6 hour(s)
+2015-01-19 15:51:54,918 | INFO | Worker-1 - Blacklist Rules Updated: {"somefield": ["somevalue", "anothervalue"]}
+2015-01-19 15:51:54,919 | INFO | Worker-0 - Blacklist Rules Updated: {"somefield": ["somevalue", "anothervalue"]}
+</pre>
+
+Every inbound message where 'somefield' equals 'somevalue' will be dropped for 2 hours, and for 6 hours where 'somefield' equals 'anothervalue'. Any number of fields and field-values can be specified, each combination with a separate outage duration.
+
+Outage data is persisted in a Redis set, populated with a unique hash ID for each field-value pair. Each hash ID references a TTL'd Redis key with the field-value data- which is polled every 5 seconds, translated into a blacklist map, then propagated to the worker processes (which log any updates to the blacklist map).
+
+Blacklist data can thus survive Occam service restarts as well as automatically propagate across a fleet of multiple Occam nodes processing a single stream of messages. The Outage API's hashing and storage method allows blacklist data to be written or updated from any node without collision, essentially allowing masterless read/write access to shared data.
+
 ### Misc.
 
 Occam attempts to never ditch messages popped from Redis; the reader loop halts on shutdown and workers allow in-flight messages to complete:

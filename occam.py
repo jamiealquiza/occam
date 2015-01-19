@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# I'm neither Pythonic nor a fan of OOP. http://knowyourmeme.com/memes/deal-with-it.
+
 # The MIT License (MIT)
 #
 # Copyright (c) 2015 Jamie Alquiza
@@ -43,7 +45,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import redis, json, random, requests, logging, re, time, signal, sys, configparser, multiprocessing
+import redis, json, random, requests, logging, re, time, signal, hashlib, sys, configparser, multiprocessing
+from threading import Thread
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 ###########
 # CONFIGS #
@@ -62,10 +66,11 @@ pd_service_key = config['pagerduty']['service_key']
 service_running = True
 msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
 
-# Checks.
-checks = open('checks.py').read()
-while "inRate" in checks: 
-  checks = checks.replace('inRate(', 'checkRate("' + str(random.getrandbits(64)) + '", ', 1)
+# Import checks, randomized an ID for rate checks. 
+tmp = str(random.getrandbits(64))
+checks = open('checks.py').read().replace('inRate', tmp)
+while tmp in checks: 
+  checks = checks.replace(tmp + '(', 'inRate("' + str(random.getrandbits(64)) + '", ', 1)
 
 # Logging config.
 log = logging.getLogger()
@@ -74,7 +79,6 @@ handler.setLevel(logging.INFO)
 handler.setFormatter(logging.Formatter(fmt='%(asctime)s | %(levelname)s | %(message)s'))
 log.addHandler(handler)
 log.setLevel(logging.INFO)
-
 
 ##########
 # INPUTS #
@@ -95,7 +99,7 @@ def inRegex(message, key, field, regex):
           if re.search(rg, message[field]): return True
     return False
 
-def checkRate(key, threshold, window):
+def inRate(key, threshold, window):
     """Rate check."""
     expires = time.time() - window
     redis_conn.zremrangebyscore(key, '-inf', expires)
@@ -104,7 +108,6 @@ def checkRate(key, threshold, window):
     if redis_conn.zcard(key) >= threshold:
         return True
     return False
-
 
 ###########
 # OUTPUTS #
@@ -161,10 +164,9 @@ def outHc(message, hc_meta):
     else:
       log.info("Message sent to HipChat")
 
-
-#############
-# INTERNALS #
-#############
+##################
+# INTERNAL FUNCS #
+##################
 
 # Ensure Redis can be pinged.
 def connRedis():
@@ -197,28 +199,136 @@ def pollRedis():
             log.warn("Failed to poll Redis")
             connRedis(redis_conn)
 
-# Pops batches from 'msgQueue' and iterates through checks.
-def matcher():
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-    while True:
-        batch = msgQueue.get()
-        for m in batch:
-          msg = json.loads(m.decode('utf-8'))
-          exec(checks)
+##############################
+# WORKER THREADS / PROCESSES #
+##############################
 
+# Worker - Pops batches from 'msgQueue' and iterates through checks.
+def matcher(worker_id, queue):
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    bl_rules = {}
+    while True:
+        # Look for blacklist rules.
+        if not queue.empty(): 
+          bl_rules =  queue.get(False)
+          log.info("Worker-%s - Blacklist Rules Updated: %s" % (worker_id, json.dumps(bl_rules)))
+        # Handle message batches.
+        try:
+          batch = msgQueue.get(True, 3)
+          for m in batch:
+            msg = json.loads(m.decode('utf-8'))
+            for k in bl_rules:
+              if k in msg:
+                if msg[k] in bl_rules[k]: break
+            else:
+              exec(checks)
+        except:
+            continue
+
+# Worker - Syncs blacklist rules with Redis.
+def blacklister(queues):
+  blacklist = {}
+  while True:
+    blacklist_update = {}
+    # What rule keys exist?
+    blacklist_keys = redis_conn.smembers('blacklist')
+    for i in blacklist_keys:
+      k = i.decode('utf-8')
+      get = redis_conn.get(k)
+      if get == None:
+        # Rule key was likely expired, remove from blacklist set.
+        redis_conn.srem('blacklist', k)
+      else:
+        kv = get.decode('utf-8').split(':')
+        # Create blacklist key for rule field if it doesn't exist,
+        # or append to existing.
+        if not kv[0] in blacklist_update:
+          blacklist_update[kv[0]] = []
+          blacklist_update[kv[0]].append(kv[1])
+        else:
+          blacklist_update[kv[0]].append(kv[1])
+
+    # Propagate rules to workers.
+    if blacklist != blacklist_update:
+      blacklist = blacklist_update
+      for i in queues: i.put(blacklist)
+    time.sleep(5)
+
+############
+# REST API #
+############
+
+# Init. This for real needs to be significantly better.
+
+class OccamApi(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/outage':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/json')
+            self.end_headers()
+            self.wfile.write(bytes("response", "utf-8"))
+        else:
+            self.send_response(200)
+            self.send_header('Content-type', 'text/json')
+            self.end_headers()
+            self.wfile.write(bytes("Request Invalid", "utf-8"))
+ 
+    def do_POST(self):
+        if self.path == '/outage':
+          # Do stuff.
+          content_length = int(self.headers['Content-Length'])
+          post_data = self.rfile.read(content_length).decode('utf-8')
+          outage_meta = post_data.split(':')
+          log.info("API - Outage Request: where '%s' == '%s' for %s hour(s)" % 
+            (outage_meta[0], outage_meta[1], outage_meta[2]))
+          # Generate outage key data.
+          outage_id = hashlib.sha1(str(outage_meta[:2]).encode()).hexdigest()
+          outage_expires = int(outage_meta[2]) * 3600
+          outage_kv = str(outage_meta[0] + ':' + outage_meta[1])
+          # Set outage.
+          redis_conn.setex(outage_id, outage_expires, outage_kv)
+          redis_conn.sadd('blacklist', outage_id)
+          # Send response.
+          self.wfile.write(bytes("Scheduled Outage", "utf-8"))
+ 
+def api():
+  server = HTTPServer((config['api']['listen'], int(config['api']['port'])), OccamApi)
+  log.info("API - Listening at %s:%s" % (config['api']['listen'], config['api']['port']))
+  server.serve_forever()
 
 ###########
 # SERVICE #
 ###########
 
 if __name__ == "__main__":
+    # Queues for propagating blacklist rules 
+    # from 'blacklister()' to 'matcher()' workers.
+    queues = []
+
     # Start 1 matcher worker if single hw thread,
     # else greater of '2' and (hw threads - 2).
     n = lambda: 1 if multiprocessing.cpu_count() == 1 else max(multiprocessing.cpu_count()-1, 2)
-    workers = [multiprocessing.Process(target=matcher) for x in range(n())]
+
+    # Initialize worker queues.
+    for i in range(n()): 
+      queue_i = multiprocessing.Queue()
+      queues.append(queue_i)
+
+    # Init workers.
+    workers = [multiprocessing.Process(target=matcher, args=(i, queues[i])) for i in range(n())]
     for i in workers:
         i.daemon = True
         i.start()
+
+    # Start 'blacklister()' sync thread.
+    bl = Thread(target=blacklister, args=(queues,))
+    bl.daemon = True
+    bl.start()
+
+    # Start REST 'api()' thread.
+    api = Thread(target=api)
+    api.daemon = True
+    api.start()
 
     # Sit-n-spin.
     try:
