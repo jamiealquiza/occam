@@ -108,7 +108,7 @@ Pending.
 ### Outage API
 Note: work in progress.
 
-The Outage API allows you to maintain a global map of key-value data that all messages are checked against and dropped before any checks are ran. Blacklisting works as follows:
+The Outage API allows you to maintain a global map of key-value 'blacklist' data that all messages are checked against and immediately dropped upon match. Blacklisting works as follows:
 <pre>
 % curl localhost:8080/outage -XPOST -d 'somefield:somevalue:2'
 % curl localhost:8080/outage -XPOST -d 'some:anothervalue:6'
