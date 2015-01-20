@@ -111,7 +111,7 @@ Note: work in progress.
 The Outage API allows you to maintain a global map of key-value 'blacklist' data that all messages are checked against and immediately dropped upon match. Blacklisting works as follows:
 <pre>
 % curl localhost:8080/outage -XPOST -d 'somefield:somevalue:2'
-% curl localhost:8080/outage -XPOST -d 'some:anothervalue:6'
+% curl localhost:8080/outage -XPOST -d 'somefield:anothervalue:6'
 </pre>
 
 Occam propagating the rules to all workers running checks:
