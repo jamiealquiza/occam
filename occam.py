@@ -229,31 +229,31 @@ def matcher(worker_id, queue):
 
 # Worker - Syncs blacklist rules with Redis.
 def blacklister(queues):
-  blacklist = {}
-  while True:
-    blacklist_update = {}
-    # What rule keys exist?
-    blacklist_keys = redis_conn.smembers('blacklist')
+    blacklist = {}
+    while True:
+        blacklist_update = {}
+        # What rule keys exist?
+        blacklist_keys = redis_conn.smembers('blacklist')
     for i in blacklist_keys:
-      k = i.decode('utf-8')
-      get = redis_conn.get(k)
-      if get == None:
-        # Rule key was likely expired, remove from blacklist set.
-        redis_conn.srem('blacklist', k)
-      else:
-        kv = get.decode('utf-8').split(':')
-        # Create blacklist key for rule field if it doesn't exist,
-        # or append to existing.
-        if not kv[0] in blacklist_update:
-          blacklist_update[kv[0]] = []
-          blacklist_update[kv[0]].append(kv[1])
+        k = i.decode('utf-8')
+        get = redis_conn.get(k)
+        if get == None:
+            # Rule key was likely expired, remove from blacklist set.
+            redis_conn.srem('blacklist', k)
         else:
-          blacklist_update[kv[0]].append(kv[1])
+            kv = get.decode('utf-8').split(':')
+            # Create blacklist key for rule field if it doesn't exist,
+            # or append to existing.
+            if not kv[0] in blacklist_update:
+                blacklist_update[kv[0]] = []
+                blacklist_update[kv[0]].append(kv[1])
+            else:
+                blacklist_update[kv[0]].append(kv[1])
 
     # Propagate rules to workers.
     if blacklist != blacklist_update:
-      blacklist = blacklist_update
-      for i in queues: i.put(blacklist)
+        blacklist = blacklist_update
+        for i in queues: i.put(blacklist)
     time.sleep(5)
 
 # Outputs stats.
