@@ -65,6 +65,7 @@ pd_service_key = config['pagerduty']['service_key']
 # General vars.
 service_running = True
 msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
+statsQueue = multiprocessing.Queue()
 
 # Import checks, randomized an ID for rate checks. 
 tmp = str(random.getrandbits(64))
@@ -191,6 +192,7 @@ def pollRedis():
             batch = pipe.execute()[0]
             if batch:
                 msgQueue.put(batch)
+                statsQueue.put(len(batch))
             else:
                 # Sleep if Redis list is empty to avoid
                 # burning cycles. Save money. See world.
@@ -254,6 +256,20 @@ def blacklister(queues):
       for i in queues: i.put(blacklist)
     time.sleep(5)
 
+# Outputs stats.
+def statser():
+  count_current = count_previous = 0
+  while True:
+    stop = time.time()+5
+    while time.time() < stop:
+      count_current += statsQueue.get()
+    if count_current > count_previous:
+      # We divide by the actual duration because
+      # thread scheduling / run time can't be trusted.
+      duration = time.time() - stop + 5
+      log.info("Messages/sec. polled: %.2f" % (count_current / duration))
+    count_previous = count_current = 0
+
 ############
 # REST API #
 ############
@@ -314,7 +330,7 @@ if __name__ == "__main__":
       queue_i = multiprocessing.Queue()
       queues.append(queue_i)
 
-    # Init workers.
+    # Init 'matcher()' workers.
     workers = [multiprocessing.Process(target=matcher, args=(i, queues[i])) for i in range(n())]
     for i in workers:
         i.daemon = True
@@ -325,10 +341,11 @@ if __name__ == "__main__":
     bl.daemon = True
     bl.start()
 
-    # Start REST 'api()' thread.
-    api = Thread(target=api)
-    api.daemon = True
-    api.start()
+    # Start REST 'api()' and 'statser()' threads.
+    for i in [statser,api]:
+      t = Thread(target=i)
+      t.daemon = True
+      t.start()
 
     # Sit-n-spin.
     try:
