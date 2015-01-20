@@ -89,7 +89,7 @@ def inMatch(message, key, ref):
     """Check if message with '@type' of 'type' has 'ref' key-value fields."""
     kv = ref.split(':')
     if "@type" in message and message['@type'] == key:
-            if kv[0] in message and message[kv[0]] == kv[1]: return True
+        if kv[0] in message and message[kv[0]] == kv[1]: return True
     return False
 
 def inRegex(message, key, field, regex):
@@ -97,7 +97,7 @@ def inRegex(message, key, field, regex):
     rg = re.compile(regex)
     if "@type" in message and message['@type'] == key:
         if field in message:
-          if re.search(rg, message[field]): return True
+            if re.search(rg, message[field]): return True
     return False
 
 def inRate(key, threshold, window):
@@ -140,9 +140,9 @@ def outPd(message, incident_key=None):
     # Ship.
     resp = requests.post(url, data=json.dumps(alert))
     if resp.status_code != 200:
-      log.warn("Error sending to PagerDuty: %s" % resp.content.decode('utf-8'))
+        log.warn("Error sending to PagerDuty: %s" % resp.content.decode('utf-8'))
     else:
-      log.info("Message sent to PagerDuty: %s" % resp.content.decode('utf-8'))
+        log.info("Message sent to PagerDuty: %s" % resp.content.decode('utf-8'))
 
 def outHc(message, hc_meta):
     """Writes to HipChat."""
@@ -161,9 +161,9 @@ def outHc(message, hc_meta):
       params={'auth_token': hc[1]},
       headers={'content-type': 'application/json'})
     if resp.status_code != (200|204):
-      log.warn("Error sending to HipChat: %s" % resp.content.decode('utf-8'))
+        log.warn("Error sending to HipChat: %s" % resp.content.decode('utf-8'))
     else:
-      log.info("Message sent to HipChat")
+        log.info("Message sent to HipChat")
 
 ##################
 # INTERNAL FUNCS #
@@ -212,18 +212,18 @@ def matcher(worker_id, queue):
     while True:
         # Look for blacklist rules.
         if not queue.empty(): 
-          bl_rules =  queue.get(False)
-          log.info("Worker-%s - Blacklist Rules Updated: %s" % (worker_id, json.dumps(bl_rules)))
+            bl_rules =  queue.get(False)
+            log.info("Worker-%s - Blacklist Rules Updated: %s" % (worker_id, json.dumps(bl_rules)))
         # Handle message batches.
         try:
-          batch = msgQueue.get(True, 3)
-          for m in batch:
-            msg = json.loads(m.decode('utf-8'))
-            for k in bl_rules:
-              if k in msg:
-                if msg[k] in bl_rules[k]: break
-            else:
-              exec(checks)
+            batch = msgQueue.get(True, 3)
+            for m in batch:
+                msg = json.loads(m.decode('utf-8'))
+                for k in bl_rules:
+                    if k in msg:
+                        if msg[k] in bl_rules[k]: break
+                    else:
+                        exec(checks)
         except:
             continue
 
@@ -258,17 +258,17 @@ def blacklister(queues):
 
 # Outputs stats.
 def statser():
-  count_current = count_previous = 0
-  while True:
-    stop = time.time()+5
-    while time.time() < stop:
-      count_current += statsQueue.get()
-    if count_current > count_previous:
-      # We divide by the actual duration because
-      # thread scheduling / run time can't be trusted.
-      duration = time.time() - stop + 5
-      log.info("Messages/sec. polled: %.2f" % (count_current / duration))
-    count_previous = count_current = 0
+    count_current = count_previous = 0
+    while True:
+      stop = time.time()+5
+      while time.time() < stop:
+          count_current += statsQueue.get()
+      if count_current > count_previous:
+          # We divide by the actual duration because
+          # thread scheduling / run time can't be trusted.
+          duration = time.time() - stop + 5
+          log.info("Messages/sec. polled: %.2f" % (count_current / duration))
+      count_previous = count_current = 0
 
 ############
 # REST API #
@@ -285,30 +285,31 @@ class OccamApi(BaseHTTPRequestHandler):
  
     def do_POST(self):
         if self.path == '/':
-          # Do stuff.
-          content_length = int(self.headers['Content-Length'])
-          post_data = self.rfile.read(content_length).decode('utf-8')
-          # Handle request.
-          try:
-            outage_meta = json.loads(post_data)['outage'].split(':')
-            log.info("API - Outage Request: where '%s' == '%s' for %s hour(s)" %
-              (outage_meta[0], outage_meta[1], outage_meta[2]))
-            # Generate outage key data.
-            outage_id = hashlib.sha1(str(outage_meta[:2]).encode()).hexdigest()
-            outage_expires = int(outage_meta[2]) * 3600
-            outage_kv = str(outage_meta[0] + ':' + outage_meta[1])
-            # Set outage.
-            redis_conn.setex(outage_id, outage_expires, outage_kv)
-            redis_conn.sadd('blacklist', outage_id)
-            # Send response.
-            self.wfile.write(bytes("Request Received: " + post_data + "\n", "utf-8"))
-          except:
-            self.wfile.write(bytes("Request Error: " + post_data + "\n", "utf-8"))
+            # Do stuff.
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            # Handle request.
+            try:
+              outage_meta = json.loads(post_data)['outage'].split(':')
+              if len(outage_meta) != 3: request_invalid(outage_meta)
+              log.info("API - Outage Request: where '%s' == '%s' for %s hour(s)" %
+                (outage_meta[0], outage_meta[1], outage_meta[2]))
+              # Generate outage key data.
+              outage_id = hashlib.sha1(str(outage_meta[:2]).encode()).hexdigest()
+              outage_expires = int(outage_meta[2]) * 3600
+              outage_kv = str(outage_meta[0] + ':' + outage_meta[1])
+              # Set outage.
+              redis_conn.setex(outage_id, outage_expires, outage_kv)
+              redis_conn.sadd('blacklist', outage_id)
+              # Send response.
+              self.wfile.write(bytes("Request Received: " + post_data + "\n", "utf-8"))
+            except:
+                self.wfile.write(bytes("Request Error: " + post_data + "\n", "utf-8"))
 
 def api():
-  server = HTTPServer((config['api']['listen'], int(config['api']['port'])), OccamApi)
-  log.info("API - Listening at %s:%s" % (config['api']['listen'], config['api']['port']))
-  server.serve_forever()
+    server = HTTPServer((config['api']['listen'], int(config['api']['port'])), OccamApi)
+    log.info("API - Listening at %s:%s" % (config['api']['listen'], config['api']['port']))
+    server.serve_forever()
 
 ###########
 # SERVICE #
@@ -325,8 +326,8 @@ if __name__ == "__main__":
 
     # Initialize worker queues.
     for i in range(n()): 
-      queue_i = multiprocessing.Queue()
-      queues.append(queue_i)
+        queue_i = multiprocessing.Queue()
+        queues.append(queue_i)
 
     # Init 'matcher()' workers.
     workers = [multiprocessing.Process(target=matcher, args=(i, queues[i])) for i in range(n())]
@@ -341,9 +342,9 @@ if __name__ == "__main__":
 
     # Start REST 'api()' and 'statser()' threads.
     for i in [statser,api]:
-      t = Thread(target=i)
-      t.daemon = True
-      t.start()
+        t = Thread(target=i)
+        t.daemon = True
+        t.start()
 
     # Sit-n-spin.
     try:
