@@ -347,6 +347,8 @@ if __name__ == "__main__":
 
     # Sit-n-spin.
     try:
+        log.info("Waiting for blacklist rules sync")
+        time.sleep(10)
         pollRedis()
     except KeyboardInterrupt:
         log.info("Stopping workers")
