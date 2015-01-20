@@ -260,15 +260,15 @@ def blacklister(queues):
 def statser():
     count_current = count_previous = 0
     while True:
-      stop = time.time()+5
-      while time.time() < stop:
-          count_current += statsQueue.get()
-      if count_current > count_previous:
-          # We divide by the actual duration because
-          # thread scheduling / run time can't be trusted.
-          duration = time.time() - stop + 5
-          log.info("Messages/sec. polled: %.2f" % (count_current / duration))
-      count_previous = count_current = 0
+        stop = time.time()+5
+        while time.time() < stop:
+            count_current += statsQueue.get()
+        if count_current > count_previous:
+            # We divide by the actual duration because
+            # thread scheduling / run time can't be trusted.
+            duration = time.time() - stop + 5
+            log.info("Messages/sec. polled: %.2f" % (count_current / duration))
+        count_previous = count_current = 0
 
 ############
 # REST API #
@@ -290,19 +290,18 @@ class OccamApi(BaseHTTPRequestHandler):
             post_data = self.rfile.read(content_length).decode('utf-8')
             # Handle request.
             try:
-              outage_meta = json.loads(post_data)['outage'].split(':')
-              if len(outage_meta) != 3: request_invalid(outage_meta)
-              log.info("API - Outage Request: where '%s' == '%s' for %s hour(s)" %
-                (outage_meta[0], outage_meta[1], outage_meta[2]))
-              # Generate outage key data.
-              outage_id = hashlib.sha1(str(outage_meta[:2]).encode()).hexdigest()
-              outage_expires = int(outage_meta[2]) * 3600
-              outage_kv = str(outage_meta[0] + ':' + outage_meta[1])
-              # Set outage.
-              redis_conn.setex(outage_id, outage_expires, outage_kv)
-              redis_conn.sadd('blacklist', outage_id)
-              # Send response.
-              self.wfile.write(bytes("Request Received: " + post_data + "\n", "utf-8"))
+                outage_meta = json.loads(post_data)['outage'].split(':')
+                log.info("API - Outage Request: where '%s' == '%s' for %s hour(s)" %
+                  (outage_meta[0], outage_meta[1], outage_meta[2]))
+                # Generate outage key data.
+                outage_id = hashlib.sha1(str(outage_meta[:2]).encode()).hexdigest()
+                outage_expires = int(outage_meta[2]) * 3600
+                outage_kv = str(outage_meta[0] + ':' + outage_meta[1])
+                # Set outage.
+                redis_conn.setex(outage_id, outage_expires, outage_kv)
+                redis_conn.sadd('blacklist', outage_id)
+                # Send response.
+                self.wfile.write(bytes("Request Received: " + post_data + "\n", "utf-8"))
             except:
                 self.wfile.write(bytes("Request Error: " + post_data + "\n", "utf-8"))
 
