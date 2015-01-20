@@ -278,35 +278,33 @@ def statser():
 
 class OccamApi(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == '/outage':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/json')
-            self.end_headers()
-            self.wfile.write(bytes("response", "utf-8"))
+        if self.path == '/':
+            self.wfile.write(bytes("Alive\n", "utf-8"))
         else:
-            self.send_response(200)
-            self.send_header('Content-type', 'text/json')
-            self.end_headers()
-            self.wfile.write(bytes("Request Invalid", "utf-8"))
+            self.wfile.write(bytes("Request Invalid\n", "utf-8"))
  
     def do_POST(self):
-        if self.path == '/outage':
+        if self.path == '/':
           # Do stuff.
           content_length = int(self.headers['Content-Length'])
           post_data = self.rfile.read(content_length).decode('utf-8')
-          outage_meta = post_data.split(':')
-          log.info("API - Outage Request: where '%s' == '%s' for %s hour(s)" % 
-            (outage_meta[0], outage_meta[1], outage_meta[2]))
-          # Generate outage key data.
-          outage_id = hashlib.sha1(str(outage_meta[:2]).encode()).hexdigest()
-          outage_expires = int(outage_meta[2]) * 3600
-          outage_kv = str(outage_meta[0] + ':' + outage_meta[1])
-          # Set outage.
-          redis_conn.setex(outage_id, outage_expires, outage_kv)
-          redis_conn.sadd('blacklist', outage_id)
-          # Send response.
-          self.wfile.write(bytes("Scheduled Outage", "utf-8"))
- 
+          # Handle request.
+          try:
+            outage_meta = json.loads(post_data)['outage'].split(':')
+            log.info("API - Outage Request: where '%s' == '%s' for %s hour(s)" %
+              (outage_meta[0], outage_meta[1], outage_meta[2]))
+            # Generate outage key data.
+            outage_id = hashlib.sha1(str(outage_meta[:2]).encode()).hexdigest()
+            outage_expires = int(outage_meta[2]) * 3600
+            outage_kv = str(outage_meta[0] + ':' + outage_meta[1])
+            # Set outage.
+            redis_conn.setex(outage_id, outage_expires, outage_kv)
+            redis_conn.sadd('blacklist', outage_id)
+            # Send response.
+            self.wfile.write(bytes("Request Received: " + post_data + "\n", "utf-8"))
+          except:
+            self.wfile.write(bytes("Request Error: " + post_data + "\n", "utf-8"))
+
 def api():
   server = HTTPServer((config['api']['listen'], int(config['api']['port'])), OccamApi)
   log.info("API - Listening at %s:%s" % (config['api']['listen'], config['api']['port']))
