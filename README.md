@@ -118,8 +118,8 @@ Request Received: {"outage": "somefield:anothervalue:6"}
 
 Occam propagating the rules to all workers running checks:
 <pre>
-/occam.py
-2015-01-19 15:51:21,905 | INFO | API - Listening at 0.0.0.0:8080
+% ./occam.py
+2015-01-19 15:51:11,905 | INFO | API - Listening at 0.0.0.0:8080
 2015-01-19 15:51:21,906 | INFO | Connected to Redis at 127.0.0.1:6379
 2015-01-19 15:51:28,609 | INFO | API - Outage Request: where 'somefield' == 'somevalue' for 2 hour(s)
 2015-01-19 15:51:33,907 | INFO | Worker-0 - Blacklist Rules Updated: {"somefield": ["somevalue"]}
