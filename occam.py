@@ -265,7 +265,7 @@ def blacklister(queues):
         if blacklist != blacklist_update:
             blacklist = blacklist_update
             for i in queues: i.put(blacklist)
-            bl_first_sync = True
+        bl_first_sync = True
         time.sleep(5)
 
 # Outputs stats.
