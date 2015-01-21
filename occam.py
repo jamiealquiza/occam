@@ -64,6 +64,7 @@ redis_conn = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
 pd_service_key = config['pagerduty']['service_key']
 
 # General vars.
+bl_first_sync = False
 service_running = True
 msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
 statsQueue = multiprocessing.Queue()
@@ -86,19 +87,14 @@ log.setLevel(logging.INFO)
 # INPUTS #
 ##########
 
-def inMatch(message, key, ref):
-    """Check if message with '@type' of 'type' has 'ref' key-value fields."""
-    kv = ref.split(':')
-    if "@type" in message and message['@type'] == key:
-        if kv[0] in message and message[kv[0]] == kv[1]: return True
+def inMatch(message, key, value):
+    if key in message and message[key] == value: return True
     return False
 
-def inRegex(message, key, field, regex):
-    """Apply 'regex' against 'field' for message with '@type' of 'key'."""
+def inRegex(message, key, regex):
     rg = re.compile(regex)
-    if "@type" in message and message['@type'] == key:
-        if field in message:
-            if re.search(rg, message[field]): return True
+    if key in message:
+        if re.search(rg, message[key]): return True
     return False
 
 def inRate(key, threshold, window):
@@ -170,6 +166,11 @@ def outHc(message, hc_meta):
 # INTERNAL FUNCS #
 ##################
 
+# Updates global running var.
+def stopService():
+    global service_running
+    service_running = False
+
 # Ensure Redis can be pinged.
 def connRedis():
     while True:
@@ -183,7 +184,8 @@ def connRedis():
 
 # Pops message batches from Redis and enqueues into 'msgQueue'.
 def pollRedis():
-    connRedis()
+    log.info("Redis Reader Task Started")
+    global service_running
     while service_running:
         # Pipeline batches to reduce net latency.
         pipe = redis_conn.pipeline()
@@ -246,8 +248,8 @@ def matcher(worker_id, queue):
                     for k in bl_rules:
                         if k in msg:
                             if msg[k] in bl_rules[k]: break
-                        else:
-                            exec(checks)
+                    else:
+                        exec(checks)
                 except:
                     continue
         except:
@@ -255,18 +257,22 @@ def matcher(worker_id, queue):
 
 # Worker - Syncs blacklist rules with Redis.
 def blacklister(queues):
+    global bl_first_sync
+    connRedis()
     blacklist = {}
-    while True:
+    while service_running:
         blacklist_update = fetchBlacklist()
         if blacklist != blacklist_update:
             blacklist = blacklist_update
             for i in queues: i.put(blacklist)
+            bl_first_sync = True
         time.sleep(5)
 
 # Outputs stats.
 def statser():
+    global service_running
     count_current = count_previous = 0
-    while True:
+    while service_running:
         stop = time.time()+5
         while time.time() < stop:
             count_current += statsQueue.get()
@@ -362,16 +368,23 @@ if __name__ == "__main__":
 
     # Sit-n-spin.
     try:
-        log.info("Waiting for blacklist rules sync")
-        time.sleep(10)
+        log.info("Waiting for Blacklist Rules sync")
+        # Avoiding adding communication to worker processes
+        # to ensure initial blacklist sync occurred, instead
+        # we wait for the first 'blacklister()' thread sync event
+        # and sleep for 5 seconds. 
+        while not bl_first_sync:
+            time.sleep(0.2)
+        time.sleep(5)
+        # Then start main Redis reader task.
         pollRedis()
     except KeyboardInterrupt:
-        log.info("Stopping workers")
-        # Halt reading from Redis.
-        service_running = False
+        log.info("Stopping Reader Threads")
+        stopService()
         while True:
             if not msgQueue.empty():
                 log.info("Waiting for in-flight messages")
                 time.sleep(3)
             else:
+                time.sleep(3)
                 sys.exit(0)
