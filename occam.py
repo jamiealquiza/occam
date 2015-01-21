@@ -276,7 +276,10 @@ def statser():
     while service_running:
         stop = time.time()+5
         while time.time() < stop:
-            count_current += statsQueue.get()
+            try:
+                count_current += statsQueue.get()
+            except:
+                continue
         if count_current > count_previous:
             # We divide by the actual duration because
             # thread scheduling / run time can't be trusted.
