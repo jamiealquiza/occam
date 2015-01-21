@@ -326,7 +326,26 @@ class OccamApi(BaseHTTPRequestHandler):
                 redis_conn.setex(outage_id, outage_expires, outage_kv)
                 redis_conn.sadd('blacklist', outage_id)
                 # Send response.
-                self.wfile.write(bytes("Request Received: " + post_data + "\n", "utf-8"))
+                self.wfile.write(bytes("Request Received - POST: " + post_data + "\n", "utf-8"))
+            except:
+                self.wfile.write(bytes("Request Error: " + post_data + "\n", "utf-8"))
+
+    def do_DELETE(self):
+        if self.path == '/':
+            # Do stuff.
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            # Handle request.
+            try:
+                outage_meta = json.loads(post_data)['outage'].split(':')
+                log.info("API - Delete Outage Request: where '%s' == '%s'" %
+                  (outage_meta[0], outage_meta[1]))
+                # Generate outage key data.
+                outage_id = hashlib.sha1(str(outage_meta[:2]).encode()).hexdigest()
+                # Set outage.
+                redis_conn.delete(outage_id)
+                # Send response.
+                self.wfile.write(bytes("Request Received - DELETE: " + post_data + "\n", "utf-8"))
             except:
                 self.wfile.write(bytes("Request Error: " + post_data + "\n", "utf-8"))
 
