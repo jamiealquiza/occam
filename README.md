@@ -98,12 +98,6 @@ An alert output (in `checks.py`) configured to send a message to the correspondi
 if inMatch(msg, "type", "somefield:somevalue"): outHc(msg, "test-room")
 </pre>
 
-### outEmail
-Pending.
-
-### outAscender
-Pending.
-
 ### Outage API
 Note: work in progress.
 
