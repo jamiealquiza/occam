@@ -107,6 +107,21 @@ Pending.
 ### Outage API
 Note: work in progress.
 
+#### Add Outage
+<pre>
+curl localhost:8080/ -XPOST -d '{"outage": "field:value:hours"}'
+</pre>
+
+#### Get Outages
+<pre>
+curl localhost:8080/
+</pre>
+
+#### Remove Outage
+<pre>
+localhost:8080/ -XDELETE -d '{"outage": "field:value"}'
+</pre>
+
 The Outage API allows you to maintain a global map of key-value 'blacklist' data that all messages are checked against and immediately dropped upon match. Blacklisting works as follows:
 <pre>
 % curl localhost:8080/ -XPOST -d '{"outage": "somefield:somevalue:2"}'
