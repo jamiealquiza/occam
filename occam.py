@@ -241,12 +241,15 @@ def matcher(worker_id, queue):
         try:
             batch = msgQueue.get(True, 3)
             for m in batch:
-                msg = json.loads(m.decode('utf-8'))
-                for k in bl_rules:
-                    if k in msg:
-                        if msg[k] in bl_rules[k]: break
-                    else:
-                        exec(checks)
+                try:
+                    msg = json.loads(m.decode('utf-8'))
+                    for k in bl_rules:
+                        if k in msg:
+                            if msg[k] in bl_rules[k]: break
+                        else:
+                            exec(checks)
+                except:
+                    continue
         except:
             continue
 
