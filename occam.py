@@ -276,15 +276,15 @@ def statser():
     while service_running:
         stop = time.time()+5
         while time.time() < stop:
-            try:
+            if not statsQueue.empty():
                 count_current += statsQueue.get()
-            except:
-                continue
+            else:
+                time.sleep(0.25)
         if count_current > count_previous:
             # We divide by the actual duration because
             # thread scheduling / run time can't be trusted.
             duration = time.time() - stop + 5
-            log.info("Messages/sec. polled: %.2f" % (count_current / duration))
+            log.info("Last %.1fs: polled %.2f messages/sec." % (duration, count_current / duration))
         count_previous = count_current = 0
 
 ############
