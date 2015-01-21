@@ -118,7 +118,7 @@ Request Received: {"outage": "somefield:anothervalue:6"}
 
 Occam propagating the rules to all workers running checks:
 <pre>
-/occam.py 
+/occam.py
 2015-01-19 15:51:21,905 | INFO | API - Listening at 0.0.0.0:8080
 2015-01-19 15:51:21,906 | INFO | Connected to Redis at 127.0.0.1:6379
 2015-01-19 15:51:28,609 | INFO | API - Outage Request: where 'somefield' == 'somevalue' for 2 hour(s)
@@ -130,6 +130,20 @@ Occam propagating the rules to all workers running checks:
 </pre>
 
 Every inbound message where 'somefield' equals 'somevalue' will be dropped for 2 hours, and for 6 hours where 'somefield' equals 'anothervalue'. Any number of fields and field-values can be specified, each combination with a separate outage duration.
+
+Current outages can be fetched via:
+<pre>
+% curl localhost:8080/
+{
+  "Current Outages Scheduled": {
+    "somefield": [
+    "anothervalue",
+    "somevalue"
+    ]
+    },
+    "Occam Start Time": "2015-01-19 09:45:47"
+  }
+</pre>
 
 Outage data is persisted in a Redis set, populated with a unique hash ID for each field-value pair. Each hash ID references a TTL'd Redis key with the field-value data- which is polled every 5 seconds, translated into a blacklist map, then propagated to the worker processes (which log any updates to the blacklist map).
 

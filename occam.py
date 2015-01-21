@@ -48,6 +48,7 @@
 import redis, json, random, requests, logging, re, time, signal, hashlib, sys, configparser, multiprocessing
 from threading import Thread
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from datetime import datetime
 
 ###########
 # CONFIGS #
@@ -67,10 +68,10 @@ service_running = True
 msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
 statsQueue = multiprocessing.Queue()
 
-# Import checks, randomized an ID for rate checks. 
+# Import checks, randomized an ID for rate checks.
 tmp = str(random.getrandbits(64))
 checks = open('checks.py').read().replace('inRate', tmp)
-while tmp in checks: 
+while tmp in checks:
   checks = checks.replace(tmp + '(', 'inRate("' + str(random.getrandbits(64)) + '", ', 1)
 
 # Logging config.
@@ -152,7 +153,7 @@ def outHc(message, hc_meta):
     url = "https://api.hipchat.com/v2/room/" + hc[0] + "/notification"
 
     notification = {
-      "message": "<b>Occam Alert</b><br>" + json.dumps(message), 
+      "message": "<b>Occam Alert</b><br>" + json.dumps(message),
       "message_format": "html"
     }
     # Ship.
@@ -201,6 +202,28 @@ def pollRedis():
             log.warn("Failed to poll Redis")
             connRedis(redis_conn)
 
+# Pulls blacklist data assembles blacklist map.
+def fetchBlacklist():
+    blacklist_update = {}
+    # What rule keys exist?
+    blacklist_keys = redis_conn.smembers('blacklist')
+    for i in blacklist_keys:
+        k = i.decode('utf-8')
+        get = redis_conn.get(k)
+        if get == None:
+            # Rule key was likely expired, remove from blacklist set.
+            redis_conn.srem('blacklist', k)
+        else:
+            kv = get.decode('utf-8').split(':')
+            # Create blacklist key for rule field if it doesn't exist,
+            # or append to existing.
+            if not kv[0] in blacklist_update:
+                blacklist_update[kv[0]] = []
+                blacklist_update[kv[0]].append(kv[1])
+            else:
+                blacklist_update[kv[0]].append(kv[1])
+    return blacklist_update
+
 ##############################
 # WORKER THREADS / PROCESSES #
 ##############################
@@ -211,7 +234,7 @@ def matcher(worker_id, queue):
     bl_rules = {}
     while True:
         # Look for blacklist rules.
-        if not queue.empty(): 
+        if not queue.empty():
             bl_rules =  queue.get(False)
             log.info("Worker-%s - Blacklist Rules Updated: %s" % (worker_id, json.dumps(bl_rules)))
         # Handle message batches.
@@ -231,30 +254,11 @@ def matcher(worker_id, queue):
 def blacklister(queues):
     blacklist = {}
     while True:
-        blacklist_update = {}
-        # What rule keys exist?
-        blacklist_keys = redis_conn.smembers('blacklist')
-    for i in blacklist_keys:
-        k = i.decode('utf-8')
-        get = redis_conn.get(k)
-        if get == None:
-            # Rule key was likely expired, remove from blacklist set.
-            redis_conn.srem('blacklist', k)
-        else:
-            kv = get.decode('utf-8').split(':')
-            # Create blacklist key for rule field if it doesn't exist,
-            # or append to existing.
-            if not kv[0] in blacklist_update:
-                blacklist_update[kv[0]] = []
-                blacklist_update[kv[0]].append(kv[1])
-            else:
-                blacklist_update[kv[0]].append(kv[1])
-
-    # Propagate rules to workers.
-    if blacklist != blacklist_update:
-        blacklist = blacklist_update
-        for i in queues: i.put(blacklist)
-    time.sleep(5)
+        blacklist_update = fetchBlacklist()
+        if blacklist != blacklist_update:
+            blacklist = blacklist_update
+            for i in queues: i.put(blacklist)
+        time.sleep(5)
 
 # Outputs stats.
 def statser():
@@ -279,10 +283,18 @@ def statser():
 class OccamApi(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/':
-            self.wfile.write(bytes("Alive\n", "utf-8"))
+            # Response message.
+            status = {
+              "Occam Start Time": datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+            }
+            # Build outage meta.
+            blacklist = fetchBlacklist()
+            if not bool(blacklist): blacklist = "None"
+            status['Current Outages Scheduled'] = blacklist
+            self.wfile.write(bytes("\n" + json.dumps(status, indent=2, sort_keys=True) + "\n", "utf-8"))
         else:
             self.wfile.write(bytes("Request Invalid\n", "utf-8"))
- 
+
     def do_POST(self):
         if self.path == '/':
             # Do stuff.
@@ -315,7 +327,7 @@ def api():
 ###########
 
 if __name__ == "__main__":
-    # Queues for propagating blacklist rules 
+    # Queues for propagating blacklist rules
     # from 'blacklister()' to 'matcher()' workers.
     queues = []
 
@@ -324,7 +336,7 @@ if __name__ == "__main__":
     n = lambda: 1 if multiprocessing.cpu_count() == 1 else max(multiprocessing.cpu_count()-1, 2)
 
     # Initialize worker queues.
-    for i in range(n()): 
+    for i in range(n()):
         queue_i = multiprocessing.Queue()
         queues.append(queue_i)
 
