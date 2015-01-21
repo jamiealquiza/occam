@@ -68,8 +68,9 @@ bl_first_sync = False
 service_running = True
 msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
 statsQueue = multiprocessing.Queue()
+start_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
 
-# Import checks, randomized an ID for rate checks.
+# Import checks, randomize an ID for rate checks.
 tmp = str(random.getrandbits(64))
 checks = open('checks.py').read().replace('inRate', tmp)
 while tmp in checks:
@@ -294,7 +295,7 @@ class OccamApi(BaseHTTPRequestHandler):
         if self.path == '/':
             # Response message.
             status = {
-              "Occam Start Time": datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+              "Occam Start Time": start_time 
             }
             # Build outage meta.
             blacklist = fetchBlacklist()
