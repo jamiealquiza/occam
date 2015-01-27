@@ -61,7 +61,6 @@ redis_retry = int(config['redis']['retry'])
 redis_host = config['redis']['host']
 redis_port = int(config['redis']['port'])
 redis_conn = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
-pd_service_key = config['pagerduty']['service_key']
 
 # General vars.
 bl_first_sync = False
@@ -116,14 +115,14 @@ def outConsole(message):
     """Writes to console."""
     log.info("Event Match: %s" % message)
 
-def outPd(message, incident_key=None):
+def outPd(message, service_alias, incident_key=None):
     """Writes to PagerDuty."""
     log.info("Event Match: %s" % message)
-
+    service_key = config['pagerduty'][service_alias]
     url = "https://events.pagerduty.com/generic/2010-04-15/create_event.json"
     alert = {
       "event_type": "trigger",
-      "service_key": pd_service_key,
+      "service_key": service_key,
       "description": "occam_alert",
       "incident_key": "",
       "details": {}

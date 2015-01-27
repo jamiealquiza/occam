@@ -52,7 +52,7 @@ The above syntax would trigger a HipChat room notification if >= 5 'somefield' =
 
 #### inMatch
 A basic equality check. With the input JSON 'msg', check if 'somefield' = 'somevalue'.
-<pre>if inMatch(msg, "type", "somefield:somevalue")</pre>
+<pre>if inMatch(msg, "somefield", "somevalue")</pre>
 
 #### inRegex
 Python regex (re) matching. With the input JSON 'msg', check pattern '.*' against the value of 'somefield'.
@@ -74,12 +74,12 @@ Writes 'msg' JSON to stdout upon match.
 <pre>outConsole(msg)</pre>
 
 #### outPd
-Triggers a PagerDuty alert to the specified `service_key` (see `config` file) via the PagerDuty generic API, appending the whole 'msg' JSON output as the PagerDuty alert 'details' body. An [incident_key](https://developer.pagerduty.com/documentation/integration/events/trigger) and PagerDuty alert description is automatically generated unless specified as a second parameter:
-<pre>outPd(msg, "web01-alerts")</pre>
+Triggers a PagerDuty alert to the specified `service_key` alias (see `config` file - multiple service_keys by alias is supported) via the PagerDuty generic API, appending the whole 'msg' JSON output as the PagerDuty alert 'details' body. An [incident_key](https://developer.pagerduty.com/documentation/integration/events/trigger) and PagerDuty alert description is automatically generated unless specified as a second parameter:
+<pre>outPd(msg, "service-alias", "web01-alerts")</pre>
 It's also valid to use a portion of the message body to dynamically generate an incident key:
-<pre>outPd(msg, msg['hostname'])</pre>
+<pre>outPd(msg, "service-alias", msg['hostname'])</pre>
 As well as a combination of a fixed string and unique message data:
-<pre>outPd(msg, msg['somefield'] + " High Load")</pre>
+<pre>outPd(msg, "service-alias", msg['somefield'] + " High Load")</pre>
 Yielding:
 <pre>
 2015-01-10 09:44:31,611 | INFO | Event Match: {'somefield': 'somevalue', '@type': 'type'}
@@ -95,7 +95,7 @@ test-room: 000000_00000000000000000000
 </pre>
 An alert output (in `checks.py`) configured to send a message to the corresponding HipChat room configuration:
 <pre>
-if inMatch(msg, "type", "somefield:somevalue"): outHc(msg, "test-room")
+if inMatch(msg, "somefield", "somevalue"): outHc(msg, "test-room")
 </pre>
 
 ### Outage API
