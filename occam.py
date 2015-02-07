@@ -70,10 +70,17 @@ statsQueue = multiprocessing.Queue()
 start_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
 
 # Import checks, randomize an ID for rate checks.
-tmp = str(random.getrandbits(64))
-checks = open('checks.py').read().replace('inRate', tmp)
-while tmp in checks:
-  checks = checks.replace(tmp + '(', 'inRate("' + str(random.getrandbits(64)) + '", ', 1)
+checks = open('checks.py').read()
+def genCheckId(check):
+    tmp = str(random.getrandbits(64))
+    parsed = checks.replace(check + '(', tmp)
+    while tmp in parsed:
+        parsed = parsed.replace(tmp, check + '("' + str(random.getrandbits(64)) + '", msg, ', 1)
+    return parsed
+
+for i in ['inRateKeyed', 'inRate']: checks = genCheckId(i)
+
+print(checks)
 
 # Logging config.
 log = logging.getLogger()
@@ -97,13 +104,22 @@ def inRegex(message, key, regex):
         if re.search(rg, message[key]): return True
     return False
 
-def inRate(key, threshold, window):
-    """Rate check."""
+def inRate(uid, message, threshold, window):
     expires = time.time() - window
-    redis_conn.zremrangebyscore(key, '-inf', expires)
+    redis_conn.zremrangebyscore(uid, '-inf', expires)
     now = time.time()
-    redis_conn.zadd(key, now, now)
-    if redis_conn.zcard(key) >= threshold:
+    redis_conn.zadd(uid, now, now)
+    if redis_conn.zcard(uid) >= threshold:
+        return True
+    return False
+
+def inRateKeyed(uid, message, key, threshold, window):
+    if key in message: uid = uid + '-' + message[key]
+    expires = time.time() - window
+    redis_conn.zremrangebyscore(uid, '-inf', expires)
+    now = time.time()
+    redis_conn.zadd(uid, now, now)
+    if redis_conn.zcard(uid) >= threshold:
         return True
     return False
 
