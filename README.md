@@ -5,7 +5,11 @@ occam
 
 ### Overview
 
-Occam is a simple event matching service that allows you to apply field matching and alerting logic to a stream of JSON messages - using a simple, declarative Python syntax that is automatically parallelized under the hood. Messages are read from a Redis list (using the list name 'messages'), populated by any means of choice. More robust queuing systems will be added in future updates.
+Occam is a simple event matching service that allows you to apply field matching and alerting logic to a stream of JSON messages - using a simple, declarative Python syntax (stored in `checks.py`) that is automatically parallelized under the hood. Messages are read from a Redis list (using the list name 'messages'), populated by any means of choice. More robust queuing systems will be added in future updates.
+
+Example use cases:
+- [Collecting](https://github.com/jamiealquiza/ascender) package versions from every node in your infrastructure and triggering a HipChat message if specific versions of a given package are detected reported in
+- Firing off a PagerDuty alert if a specific service has triggered a warning n times in x seconds across your whole fleet
 
 The following in `checks.py` would check if any incoming messages included the field 'somefield' with the value 'someval', sending the output to console upon match:
 
@@ -17,7 +21,7 @@ A message pushed into the reference Redis list:
 <pre>
 % redis-cli lpush messages '{ "somefield": "someval" }'
 </pre>
-Then Occam started, yielding the match:
+Starting Occam, yielding the matched message according to the configured check:
 <pre>
 % ./occam.py
 2015-01-21 11:20:21,920 | INFO | Waiting for Blacklist Rules sync
