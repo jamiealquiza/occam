@@ -75,12 +75,10 @@ def genCheckId(check):
     tmp = str(random.getrandbits(64))
     parsed = checks.replace(check + '(', tmp)
     while tmp in parsed:
-        parsed = parsed.replace(tmp, check + '("' + str(random.getrandbits(64)) + '", msg, ', 1)
+        parsed = parsed.replace(tmp, check + '("rate-' + str(random.getrandbits(64)) + '", msg, ', 1)
     return parsed
 
 for i in ['inRateKeyed', 'inRate']: checks = genCheckId(i)
-
-print(checks)
 
 # Logging config.
 log = logging.getLogger()
@@ -109,6 +107,7 @@ def inRate(uid, message, threshold, window):
     redis_conn.zremrangebyscore(uid, '-inf', expires)
     now = time.time()
     redis_conn.zadd(uid, now, now)
+    redis_conn.expire(uid, window * 2)
     if redis_conn.zcard(uid) >= threshold:
         return True
     return False
@@ -119,6 +118,7 @@ def inRateKeyed(uid, message, key, threshold, window):
     redis_conn.zremrangebyscore(uid, '-inf', expires)
     now = time.time()
     redis_conn.zadd(uid, now, now)
+    redis_conn.expire(uid, window * 2)
     if redis_conn.zcard(uid) >= threshold:
         return True
     return False
@@ -241,6 +241,7 @@ def fetchBlacklist():
             else:
                 blacklist_update[kv[0]].append(kv[1])
     return blacklist_update
+
 
 ##############################
 # WORKER THREADS / PROCESSES #
