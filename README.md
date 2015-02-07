@@ -8,9 +8,11 @@ occam
 Occam is a simple event matching service that allows you to write JSON message matching -> action logic using a simple, declarative Python syntax that is automatically parallelized under the hood. Messages are read from a Redis list, populated by any means of choice.
 
 The following in `checks.py` would check if any incoming messages included the field 'somefield' with the value 'someval', sending the output to console upon match:
-<pre>
+
+```python
 if inMatch(msg, "somefield", "someval"): outConsole(msg)
-</pre>
+```
+
 A message pushed into the reference Redis list:
 <pre>
 % redis-cli lpush messages '{ "somefield": "someval" }'
@@ -26,60 +28,104 @@ Then Occam started, yielding the match:
 </pre>
 
 Matching syntax can be nested and chained to require additional conditions:
-<pre>
-if inMatch(msg, "somefield", "someval"):
-  if inMatch(msg, "anotherfield", "anotherval"):
-    outConsole(msg)
-</pre>
-The above check would trigger a log to console, given a single message where both 'somefield' and 'anotherfield' values equaled 'someval' and 'anotherval'.
+```python
+if inMatch(msg, "@type", "ssh-log") and inMatch(msg, "failed-attempt", "true"):
+  outConsole(msg)
+```
+The above check would trigger a log to console, given a single message where the fields '@type' and 'failed-attempt' held the values 'ssh-log' and 'true', respectively.
 
-<br><br>
-
-Additional input / output actions exist that allow more complex logic, such as sub-sampling or different output actions at each depth of conditions met:
-<pre>
-if inMatch(msg, "somefield", "someval") and inRate(5, 60):
-  if inMatch(msg, "anotherfield", "anotherval") and inRate(10, 30):
+Additional input / output actions exist that allow for more complex logic, such as sub-sampling or different output actions at each depth of conditions met. A real life configuration might look like:
+```python
+# A block of checks for all '@type' 'service-health' messages. 
+if inMatch(msg, "@type": "service-health"):
+  # If level is critical, alert via PagerDuty immediately.
+  if inMatch(msg, "level", "critical"): outPd(msg)
+  # If a single hosts reports 5 warning levels in 60s,
+  if inMatch(msg, "level", "warning") and inRateKeyed("hostname", 5, 60):
+    # And if within this warning treshold, 10 times in 30s it's due to the newly released 
+    # 'new-service', then also send us a PagerDuty message:
+    if inMatch(msg, "service", "new-service") and inRate(10, 30):
       outPd(msg)
+  # Otherwise, just notify the ops HipChat room:
   else:
-      outHc(msg, "ops-room")
-</pre>
+    outHc(msg, "ops-room")
+```
 
-The above syntax would trigger a HipChat room notification if >= 5 'somefield' = 'someval' matches were observed within a rolling 60 second window. If we were to exceed this threshold with say 35 matching events and >= 10 of those 35 events also held 'anotherfield' with the value 'anotherval' within a 30 second rolling window, we would trigger a PagerDuty alert.
+Typically, you'd throw a top-level 'inMatch' for a whole class of message types (such as all messages where the field '@type' is 'apache') followed by all of the matching logic respecive to that message class. The above block would be all of the matching / alerting logic we care about solely in regards to 'service-health' messages.
 
-`checks.py` can contain any number of rules that every message will iterate against.
-
-### Inputs / Outputs
+### Inputs
 
 #### inMatch
 A basic equality check. With the input JSON 'msg', check if 'somefield' = 'somevalue'.
-<pre>if inMatch(msg, "somefield", "somevalue")</pre>
+```python
+if inMatch(msg, "somefield", "somevalue")
+```
 
 #### inRegex
 Python regex (re) matching. With the input JSON 'msg', check pattern '.*' against the value of 'somefield'.
-<pre>if inRegex(msg, "somefield", ".*")</pre>
+```python
+if inRegex(msg, "somefield", ".*")
+```
 
 #### inRate
 Rolling window rate check. Anchor function that is placed within a series of conditionals that requires a threshold of all preceding conditions to have been met '5' times within a '30' second rolling window, otherwise, the chain of conditions will be short-circuited.
-<pre>
+```python
 inRate(5, 30)
-</pre>
-In line example:
-<pre>
+```
+Example:
+```python
 if inMatch(msg, "somefield", "somevalue") and inRate(5, 30): outConsole(msg)
+```
+
+#### inRateKeyed
+Rolling window rate check that dynamically generates seperate rate checks based on the value of a given message field.
+
+```python
+inRateKeyed("somefield", 5, 30)
+```
+
+Given the following checks logic, we would be able to use a generic rate checking syntax that would only trigger if the rate treshold were met from a single host:
+```python
+if inMatch(msg, "error-level", "warning") and inRateKeyed("hostname", 5, 30): outConsole(msg)
+```
+
+If this same check were configured using the basic 'inRate' check as follows:
+```python
+if inMatch(msg, "error-level", "warning") and inRate(5, 30): outConsole(msg)
+```
+
+The following message stream (within a 30s window) would trigger a match even though no single host exceeded the rate threshold:
+<pre>
+'{ "error-level": "warning", "hostname": "host-1" }'
+'{ "error-level": "warning", "hostname": "host-1" }'
+'{ "error-level": "warning", "hostname": "host-2" }'
+'{ "error-level": "warning", "hostname": "host-2" }'
+'{ "error-level": "warning", "hostname": "host-2" }'
 </pre>
 
+### Outputs
 
 #### outConsole
 Writes 'msg' JSON to stdout upon match.
-<pre>outConsole(msg)</pre>
+```python
+outConsole(msg)
+```
 
 #### outPd
 Triggers a PagerDuty alert to the specified `service_key` alias (see `config` file - multiple service_keys by alias is supported) via the PagerDuty generic API, appending the whole 'msg' JSON output as the PagerDuty alert 'details' body. An [incident_key](https://developer.pagerduty.com/documentation/integration/events/trigger) and PagerDuty alert description is automatically generated unless specified as a second parameter:
-<pre>outPd(msg, "service-alias", "web01-alerts")</pre>
+```python
+outPd(msg, "service-alias", "web01-alerts")
+```
+
 It's also valid to use a portion of the message body to dynamically generate an incident key:
-<pre>outPd(msg, "service-alias", msg['hostname'])</pre>
+```python
+outPd(msg, "service-alias", msg['hostname'])
+```
 As well as a combination of a fixed string and unique message data:
-<pre>outPd(msg, "service-alias", msg['somefield'] + " High Load")</pre>
+```python
+outPd(msg, "service-alias", msg['somefield'] + " High Load")
+```
+
 Yielding:
 <pre>
 2015-01-10 09:44:31,611 | INFO | Event Match: {'somefield': 'somevalue', '@type': 'type'}
@@ -94,9 +140,9 @@ Sends a [room notification](https://www.hipchat.com/docs/apiv2/method/send_room_
 test-room: 000000_00000000000000000000
 </pre>
 An alert output (in `checks.py`) configured to send a message to the corresponding HipChat room configuration:
-<pre>
+```python
 if inMatch(msg, "somefield", "somevalue"): outHc(msg, "test-room")
-</pre>
+```
 
 ### Outage API
 Note: work in progress.
