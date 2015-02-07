@@ -5,7 +5,7 @@ occam
 
 ### Overview
 
-Occam is a simple event matching service that allows you to write JSON message matching -> action logic using a simple, declarative Python syntax that is automatically parallelized under the hood. Messages are read from a Redis list, populated by any means of choice.
+Occam is a simple event matching service that allows you to apply field matching and alerting logic to a stream of JSON messages - using a simple, declarative Python syntax that is automatically parallelized under the hood. Messages are read from a Redis list (using the list name 'messages'), populated by any means of choice. More robust queuing systems will be added in future updates.
 
 The following in `checks.py` would check if any incoming messages included the field 'somefield' with the value 'someval', sending the output to console upon match:
 
