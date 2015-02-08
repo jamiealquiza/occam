@@ -1,0 +1,4 @@
+*.pyc
+*.rdb
+__pycache__
+venv
