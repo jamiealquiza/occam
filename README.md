@@ -45,7 +45,7 @@ if inMatch(msg, "@type": "service-health"):
   # If level is critical, alert via PagerDuty immediately.
   if inMatch(msg, "level", "critical"): outPd(msg)
   # If a single hosts reports 5 warning levels in 60s,
-  if inMatch(msg, "level", "warning") and inRateKeyed("hostname", 5, 60):
+  if inMatch(msg, "level", "warning") and inRateKeyed(msg, "hostname", 5, 60):
     # And if within this warning treshold, 10 times in 30s it's due to the newly released 
     # 'new-service', then also send us a PagerDuty message:
     if inMatch(msg, "service", "new-service") and inRate(10, 30):
@@ -85,12 +85,12 @@ if inMatch(msg, "somefield", "somevalue") and inRate(5, 30): outConsole(msg)
 Rolling window rate check that dynamically generates seperate rate checks based on the value of a given message field.
 
 ```python
-inRateKeyed("somefield", 5, 30)
+inRateKeyed(msg, "somefield", 5, 30)
 ```
 
 Given the following checks logic, we would be able to use a generic rate checking syntax that would only trigger if the rate treshold were met from a single host:
 ```python
-if inMatch(msg, "error-level", "warning") and inRateKeyed("hostname", 5, 30): outConsole(msg)
+if inMatch(msg, "error-level", "warning") and inRateKeyed(msg, "hostname", 5, 30): outConsole(msg)
 ```
 
 If this same check were configured using the basic 'inRate' check as follows:

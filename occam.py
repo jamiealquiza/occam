@@ -45,10 +45,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import redis, json, random, requests, logging, re, time, signal, hashlib, sys, configparser, multiprocessing
+import redis, json, random, requests, logging, re, time, signal, hashlib, sys, configparser, multiprocessing, traceback
 from threading import Thread
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
+
+import checks
 
 ###########
 # CONFIGS #
@@ -69,17 +71,6 @@ msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
 statsQueue = multiprocessing.Queue()
 start_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
 
-# Import checks, randomize an ID for rate checks.
-checks = open('checks.py').read()
-def genCheckId(check):
-    tmp = str(random.getrandbits(64))
-    parsed = checks.replace(check + '(', tmp)
-    while tmp in parsed:
-        parsed = parsed.replace(tmp, check + '("rate-' + str(random.getrandbits(64)) + '", msg, ', 1)
-    return parsed
-
-for i in ['inRateKeyed', 'inRate']: checks = genCheckId(i)
-
 # Logging config.
 log = logging.getLogger()
 handler = logging.StreamHandler()
@@ -87,96 +78,6 @@ handler.setLevel(logging.INFO)
 handler.setFormatter(logging.Formatter(fmt='%(asctime)s | %(levelname)s | %(message)s'))
 log.addHandler(handler)
 log.setLevel(logging.INFO)
-
-##########
-# INPUTS #
-##########
-
-def inMatch(message, key, value):
-    if key in message and message[key] == value: return True
-    return False
-
-def inRegex(message, key, regex):
-    rg = re.compile(regex)
-    if key in message:
-        if re.search(rg, message[key]): return True
-    return False
-
-def inRate(uid, message, threshold, window):
-    expires = time.time() - window
-    redis_conn.zremrangebyscore(uid, '-inf', expires)
-    now = time.time()
-    redis_conn.zadd(uid, now, now)
-    redis_conn.expire(uid, window * 2)
-    if redis_conn.zcard(uid) >= threshold:
-        return True
-    return False
-
-def inRateKeyed(uid, message, key, threshold, window):
-    if key in message: uid = uid + '-' + message[key]
-    expires = time.time() - window
-    redis_conn.zremrangebyscore(uid, '-inf', expires)
-    now = time.time()
-    redis_conn.zadd(uid, now, now)
-    redis_conn.expire(uid, window * 2)
-    if redis_conn.zcard(uid) >= threshold:
-        return True
-    return False
-
-###########
-# OUTPUTS #
-###########
-
-def outConsole(message):
-    """Writes to console."""
-    log.info("Event Match: %s" % message)
-
-def outPd(message, service_alias, incident_key=None):
-    """Writes to PagerDuty."""
-    log.info("Event Match: %s" % message)
-    service_key = config['pagerduty'][service_alias]
-    url = "https://events.pagerduty.com/generic/2010-04-15/create_event.json"
-    alert = {
-      "event_type": "trigger",
-      "service_key": service_key,
-      "description": "occam_alert",
-      "incident_key": "",
-      "details": {}
-    }
-
-    # Append whole message as PD alert details.
-    alert['details'] = json.dumps(message)
-
-    # Create incident_key if provided.
-    if incident_key: alert['incident_key'] = alert['description'] = incident_key
-
-    # Ship.
-    resp = requests.post(url, data=json.dumps(alert))
-    if resp.status_code != 200:
-        log.warn("Error sending to PagerDuty: %s" % resp.content.decode('utf-8'))
-    else:
-        log.info("Message sent to PagerDuty: %s" % resp.content.decode('utf-8'))
-
-def outHc(message, hc_meta):
-    """Writes to HipChat."""
-    log.info("Event Match: %s" % message)
-
-    hc = config['hipchat'][hc_meta].split("_")
-    url = "https://api.hipchat.com/v2/room/" + hc[0] + "/notification"
-
-    notification = {
-      "message": "<b>Occam Alert</b><br>" + json.dumps(message),
-      "message_format": "html"
-    }
-    # Ship.
-    resp = requests.post(url,
-      data=json.dumps(notification),
-      params={'auth_token': hc[1]},
-      headers={'content-type': 'application/json'})
-    if resp.status_code != (200|204):
-        log.warn("Error sending to HipChat: %s" % resp.content.decode('utf-8'))
-    else:
-        log.info("Message sent to HipChat")
 
 ##################
 # INTERNAL FUNCS #
@@ -266,7 +167,10 @@ def matcher(worker_id, queue):
                         if k in msg:
                             if msg[k] in bl_rules[k]: break
                     else:
-                        exec(checks)
+                        try:
+                            checks.run(msg)
+                        except:
+                            log.error("Exception occurred processing message:\n%s" % (traceback.format_exc()))
                 except:
                     continue
         except:
