@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# I'm neither Pythonic nor a fan of OOP. http://knowyourmeme.com/memes/deal-with-it.
+# This might have a severe lack of Pythonism or OOP. http://knowyourmeme.com/memes/deal-with-it.
 
 # The MIT License (MIT)
 #
@@ -66,7 +66,6 @@ redis_conn = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
 
 # General vars.
 bl_first_sync = False
-service_running = True
 msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
 statsQueue = multiprocessing.Queue()
 start_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
@@ -79,141 +78,170 @@ handler.setFormatter(logging.Formatter(fmt='%(asctime)s | %(levelname)s | %(mess
 log.addHandler(handler)
 log.setLevel(logging.INFO)
 
-##################
-# INTERNAL FUNCS #
-##################
+#######################
+# WORKERS / PROCESSES #
+#######################
 
-# Updates global running var.
-def stopService():
-    global service_running
-    service_running = False
+class Matcher(multiprocessing.Process):
+    """Worker that pops batches from 'msgQueue' and iterates through checks.py"""
+    def __init__(self, worker_id, queue):
+        multiprocessing.Process.__init__(self)
+        self.daemon = True
+        self.worker_id = worker_id
+        self.queue = queue
 
-# Ensure Redis can be pinged.
-def connRedis():
-    while True:
-        try:
-            redis_conn.ping()
-            log.info("Connected to Redis at %s:%d" % (redis_host, redis_port))
-            break
-        except Exception:
-            log.warn("Redis unreachable, retrying in %ds" % redis_retry)
-            time.sleep(redis_retry)
+    def run(self):
+        log.info("Match worker %d started" % self.worker_id)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        bl_rules = {}
+        while True:
+            # Look for blacklist rules.
+            if not self.queue.empty():
+                bl_rules =  self.queue.get(False)
+                log.info("Worker-%s - Blacklist Rules Updated: %s" %
+                  (self.worker_id, json.dumps(bl_rules)))
+            # Handle message batches.
+            try:
+                batch = msgQueue.get(True, 3)
+                for m in batch:
+                    try:
+                        msg = json.loads(m.decode('utf-8'))
+                        for k in bl_rules:
+                            if k in msg:
+                                if msg[k] in bl_rules[k]: break
+                        else:
+                            try:
+                                checks.run(msg)
+                            except:
+                                log.error("Exception occurred processing message:\n%s" % 
+                                  (traceback.format_exc()))
+                    except:
+                        continue
+            except:
+                continue
 
-# Pops message batches from Redis and enqueues into 'msgQueue'.
-def pollRedis():
-    log.info("Redis Reader Task Started")
-    global service_running
-    while service_running:
-        # Pipeline batches to reduce net latency.
-        pipe = redis_conn.pipeline()
-        pipe.lrange('messages', 0, 99)
-        pipe.ltrim('messages', 100, -1)
-        try:
-            batch = pipe.execute()[0]
-            if batch:
-                msgQueue.put(batch)
-                statsQueue.put(len(batch))
+###################
+# TASKS / THREADS #
+###################
+
+class RedisReader(Thread):
+    """Outputs periodic stats info"""
+    def __init__(self):
+        Thread.__init__(self)
+        self.running = True
+
+    # Pops message batches from Redis and enqueues into 'msgQueue'.
+    def run(self):
+        log.info("Redis Reader Task Started")
+        while self.running:
+            # Pipeline batches to reduce net latency.
+            pipe = redis_conn.pipeline()
+            pipe.lrange('messages', 0, 99)
+            pipe.ltrim('messages', 100, -1)
+            try:
+                batch = pipe.execute()[0]
+                if batch:
+                    msgQueue.put(batch)
+                    statsQueue.put(len(batch))
+                else:
+                    # Sleep if Redis list is empty to avoid
+                    # burning cycles. Save money. See world.
+                    time.sleep(3)
+            except Exception:
+                log.warn("Failed to poll Redis")
+                self.try_redis_connection(redis_conn)
+
+    def stop(self):
+            self.running = False
+            log.info("Redis Reader Task Stopping")
+
+    # Ensure Redis can be pinged.
+    def try_redis_connection(self):
+        while True:
+            try:
+                redis_conn.ping()
+                log.info("Connected to Redis at %s:%d" % (redis_host, redis_port))
+                break
+            except Exception:
+                log.warn("Redis unreachable, retrying in %ds" % redis_retry)
+                time.sleep(redis_retry)
+
+class Blacklister(Thread):
+    """Syncs blacklist rules with Redis"""
+    def __init__(self, queues):
+        Thread.__init__(self)
+        self.daemon = True
+        self.queues = queues
+
+    def run(self):
+        global bl_first_sync
+        blacklist = {}
+        while True:
+            blacklist_update = self.fetch_blacklist()
+            if blacklist != blacklist_update:
+                blacklist = blacklist_update
+                for i in self.queues: i.put(blacklist)
+            bl_first_sync = True
+            time.sleep(5)
+
+    def fetch_blacklist(self):
+        blacklist_update = {}
+        # What rule keys exist?
+        blacklist_keys = redis_conn.smembers('blacklist')
+        for i in blacklist_keys:
+            k = i.decode('utf-8')
+            get = redis_conn.get(k)
+            if get == None:
+                # Rule key was likely expired, remove from blacklist set.
+                redis_conn.srem('blacklist', k)
             else:
-                # Sleep if Redis list is empty to avoid
-                # burning cycles. Save money. See world.
-                time.sleep(3)
-        except Exception:
-            log.warn("Failed to poll Redis")
-            connRedis(redis_conn)
-
-# Pulls blacklist data assembles blacklist map.
-def fetchBlacklist():
-    blacklist_update = {}
-    # What rule keys exist?
-    blacklist_keys = redis_conn.smembers('blacklist')
-    for i in blacklist_keys:
-        k = i.decode('utf-8')
-        get = redis_conn.get(k)
-        if get == None:
-            # Rule key was likely expired, remove from blacklist set.
-            redis_conn.srem('blacklist', k)
-        else:
-            kv = get.decode('utf-8').split(':')
-            # Create blacklist key for rule field if it doesn't exist,
-            # or append to existing.
-            if not kv[0] in blacklist_update:
-                blacklist_update[kv[0]] = []
-                blacklist_update[kv[0]].append(kv[1])
-            else:
-                blacklist_update[kv[0]].append(kv[1])
-    return blacklist_update
+                kv = get.decode('utf-8').split(':')
+                # Create blacklist key for rule field if it doesn't exist,
+                # or append to existing.
+                if not kv[0] in blacklist_update:
+                    blacklist_update[kv[0]] = []
+                    blacklist_update[kv[0]].append(kv[1])
+                else:
+                    blacklist_update[kv[0]].append(kv[1])
+        return blacklist_update
 
 
-##############################
-# WORKER THREADS / PROCESSES #
-##############################
+class Statser(Thread):
+    """Outputs periodic stats info"""
+    def __init__(self):
+        Thread.__init__(self)
+        self.daemon = True
 
-# Worker - Pops batches from 'msgQueue' and iterates through checks.
-def matcher(worker_id, queue):
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-    bl_rules = {}
-    while True:
-        # Look for blacklist rules.
-        if not queue.empty():
-            bl_rules =  queue.get(False)
-            log.info("Worker-%s - Blacklist Rules Updated: %s" % (worker_id, json.dumps(bl_rules)))
-        # Handle message batches.
-        try:
-            batch = msgQueue.get(True, 3)
-            for m in batch:
-                try:
-                    msg = json.loads(m.decode('utf-8'))
-                    for k in bl_rules:
-                        if k in msg:
-                            if msg[k] in bl_rules[k]: break
-                    else:
-                        try:
-                            checks.run(msg)
-                        except:
-                            log.error("Exception occurred processing message:\n%s" % (traceback.format_exc()))
-                except:
-                    continue
-        except:
-            continue
+    def run(self):
+        count_current = count_previous = 0
+        while True:
+            stop = time.time()+5
+            while time.time() < stop:
+                if not statsQueue.empty():
+                    count_current += statsQueue.get()
+                else:
+                    time.sleep(0.25)
+            if count_current > count_previous:
+                # We divide by the actual duration because
+                # thread scheduling / run time can't be trusted.
+                duration = time.time() - stop + 5
+                log.info("Last %.1fs: polled %.2f messages/sec." % (duration, count_current / duration))
+            count_previous = count_current = 0
 
-# Worker - Syncs blacklist rules with Redis.
-def blacklister(queues):
-    global bl_first_sync
-    connRedis()
-    blacklist = {}
-    while service_running:
-        blacklist_update = fetchBlacklist()
-        if blacklist != blacklist_update:
-            blacklist = blacklist_update
-            for i in queues: i.put(blacklist)
-        bl_first_sync = True
-        time.sleep(5)
-
-# Outputs stats.
-def statser():
-    global service_running
-    count_current = count_previous = 0
-    while service_running:
-        stop = time.time()+5
-        while time.time() < stop:
-            if not statsQueue.empty():
-                count_current += statsQueue.get()
-            else:
-                time.sleep(0.25)
-        if count_current > count_previous:
-            # We divide by the actual duration because
-            # thread scheduling / run time can't be trusted.
-            duration = time.time() - stop + 5
-            log.info("Last %.1fs: polled %.2f messages/sec." % (duration, count_current / duration))
-        count_previous = count_current = 0
-
-############
-# REST API #
-############
-
+# REST API 
 # Init. This for real needs to be significantly better.
+class Api(Thread):
+    """Outputs periodic stats info"""
+    def __init__(self):
+        Thread.__init__(self)
+        self.daemon = True
 
-class OccamApi(BaseHTTPRequestHandler):
+    def run(self):
+        server = HTTPServer((config['api']['listen'], int(config['api']['port'])), ApiCalls)
+        log.info("API - Listening at %s:%s" % (config['api']['listen'], config['api']['port']))
+        server.serve_forever()
+
+class ApiCalls(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/':
             # Response message.
@@ -221,7 +249,7 @@ class OccamApi(BaseHTTPRequestHandler):
               "Occam Start Time": start_time 
             }
             # Build outage meta.
-            blacklist = fetchBlacklist()
+            blacklist = getattr(Blacklister, fetch_blacklist)()
             if not bool(blacklist): blacklist = "None"
             status['Current Outages Scheduled'] = blacklist
             self.wfile.write(bytes("\n" + json.dumps(status, indent=2, sort_keys=True) + "\n", "utf-8"))
@@ -269,45 +297,35 @@ class OccamApi(BaseHTTPRequestHandler):
             except:
                 self.wfile.write(bytes("Request Error: " + post_data + "\n", "utf-8"))
 
-def api():
-    server = HTTPServer((config['api']['listen'], int(config['api']['port'])), OccamApi)
-    log.info("API - Listening at %s:%s" % (config['api']['listen'], config['api']['port']))
-    server.serve_forever()
-
 ###########
 # SERVICE #
 ###########
 
 if __name__ == "__main__":
-    # Queues for propagating blacklist rules
-    # from 'blacklister()' to 'matcher()' workers.
-    queues = []
+    # Start 1 matcher worker if single hw thread, else greater of '2' and (hw threads - 2).
+    n = 1 if multiprocessing.cpu_count() == 1 else max(multiprocessing.cpu_count()-1, 2)
 
-    # Start 1 matcher worker if single hw thread,
-    # else greater of '2' and (hw threads - 2).
-    n = lambda: 1 if multiprocessing.cpu_count() == 1 else max(multiprocessing.cpu_count()-1, 2)
-
-    # Initialize worker queues.
-    for i in range(n()):
+    # Initialize workers and queues.
+    # Append queues to list that's fed to the blacklister thread.
+    blacklist_queues = []
+    for i in range(n):
         queue_i = multiprocessing.Queue()
-        queues.append(queue_i)
-
-    # Init 'matcher()' workers.
-    workers = [multiprocessing.Process(target=matcher, args=(i, queues[i])) for i in range(n())]
-    for i in workers:
-        i.daemon = True
-        i.start()
-
+        blacklist_queues.append(queue_i)
+        worker = Matcher(i, queue_i)
+        worker.start()
+        
     # Start 'blacklister()' sync thread.
-    bl = Thread(target=blacklister, args=(queues,))
-    bl.daemon = True
-    bl.start()
+    blacklister = Blacklister(blacklist_queues)
+    blacklister.start()
 
     # Start REST 'api()' and 'statser()' threads.
-    for i in [statser,api]:
-        t = Thread(target=i)
-        t.daemon = True
-        t.start()
+    statser = Statser()
+    statser.start()
+    api = Api()
+    api.start()
+
+    # Redis thread.
+    redis_reader = RedisReader()
 
     # Sit-n-spin.
     try:
@@ -320,14 +338,14 @@ if __name__ == "__main__":
             time.sleep(0.2)
         time.sleep(5)
         # Then start main Redis reader task.
-        pollRedis()
+        redis_reader.start()
     except KeyboardInterrupt:
-        log.info("Stopping Reader Threads")
-        stopService()
+        redis_reader.stop()
         while True:
             if not msgQueue.empty():
                 log.info("Waiting for in-flight messages")
                 time.sleep(3)
             else:
-                time.sleep(3)
+                # Do something smarter than time.sleep(n) eventually.
+                time.sleep(1)
                 sys.exit(0)
