@@ -1,8 +1,9 @@
 import json, requests
 
-from occam import log
+from occam import log, handler
 from occam import config
 
+log.removeHandler(handler)
 
 def outConsole(message):
     """Writes to console."""
