@@ -1,27 +1,35 @@
-import requests, multiprocessing
+import multiprocessing
+import requests
 
 from log import log
 
+
 alertsQueue = multiprocessing.Queue()
 
+
 def outConsole(message):
+    """Writes message to console"""
     alertsQueue.put(("outConsole", message)) 
 
 def outPd(message, service_alias, incident_key=None):
+    """Writes message to PagerDuty"""
     alertsQueue.put(("outPd", message, service_alias, incident_key))
     
 def outHc(message, hc_meta):
+    """Writes message to HipChat"""
     alertsQueue.put(("outHc", message, hc_meta))
 
 
 def outConsoleHandler(meta):
-    """Writes to console"""
     message = meta[1]
     log.info("Event Match: %s" % message)
 
 
+################
+# OUTPUT LOGIC #
+################
+
 def outHcHandler(meta):
-    """Writes to HipChat"""
     log.info("Event Match: %s" % message)
 
     message, hc_meta = meta[1:]
@@ -45,7 +53,6 @@ def outHcHandler(meta):
 
 
 def outPdHandler(meta):
-    """Writes to PagerDuty."""
     log.info("Event Match: %s" % message)
 
     message, service_alias, incident_key = meta[1:]
@@ -72,4 +79,3 @@ def outPdHandler(meta):
         log.warn("Error sending to PagerDuty: %s" % resp.content.decode('utf-8'))
     else:
         log.info("Message sent to PagerDuty: %s" % resp.content.decode('utf-8'))
-

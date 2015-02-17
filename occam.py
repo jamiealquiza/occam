@@ -1,43 +1,33 @@
 #!/usr/bin/env python3
 
-# This might have a severe lack of Pythonism or OOP. http://knowyourmeme.com/memes/deal-with-it.
+# http://knowyourmeme.com/memes/deal-with-it.
 
-# The MIT License (MIT)
-#
-# Copyright (c) 2015 Jamie Alquiza
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-# The MIT License (MIT)
+import configparser
+import hashlib
+import json
+import multiprocessing
+import random
+import re
+import requests
+import signal
+import sys
+import time
+import traceback
 
-import redis, json, random, requests, re, time, signal, hashlib, sys, configparser, multiprocessing, traceback
-from threading import Thread
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from threading import Thread
 
-import checks, outputs
+import redis
+
+import checks
 from log import log
+import outputs
 
 ###########
 # CONFIGS #
 ###########
 
-# Config vars.
 config = configparser.ConfigParser()
 config.read('config')
 redis_retry = int(config['redis']['retry'])
@@ -45,7 +35,6 @@ redis_host = config['redis']['host']
 redis_port = int(config['redis']['port'])
 redis_conn = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
 
-# General vars.
 start_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
 msgQueue = multiprocessing.Queue(multiprocessing.cpu_count() * 6)
 statsQueue = multiprocessing.Queue()
@@ -55,7 +44,7 @@ statsQueue = multiprocessing.Queue()
 #######################
 
 class Matcher(multiprocessing.Process):
-    """Worker that pops batches from 'msgQueue' and iterates through checks.py"""
+    """Worker process that pops batches from msgQueue queue and iterates through checks.py"""
     def __init__(self, worker_id, queue):
         multiprocessing.Process.__init__(self)
         self.daemon = True
@@ -68,12 +57,13 @@ class Matcher(multiprocessing.Process):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         bl_rules = {}
         while self.running:
-            # Look for blacklist rules.
+            # Look for blacklist rules update.
             if not self.queue.empty():
                 bl_rules =  self.queue.get(False)
                 log.info("Worker-%s - Blacklist Rules Updated: %s" %
-                  (self.worker_id, json.dumps(bl_rules)))
-            # Handle message batches. Wallering in trys ftw.
+                        (self.worker_id, json.dumps(bl_rules)))
+            # Handle message batches. 
+            # Abundance of try/except (for now) since arbitrary code is injected as config.
             try:
                 batch = msgQueue.get(True, 3)
                 for m in batch:
@@ -87,7 +77,7 @@ class Matcher(multiprocessing.Process):
                                 checks.run(msg)
                             except:
                                 log.error("Exception occurred processing message:\n%s" % 
-                                  (traceback.format_exc()))
+                                        (traceback.format_exc()))
                     except:
                         continue
             except:
@@ -136,13 +126,12 @@ class Tasks(multiprocessing.Process):
 ###################
 
 class RedisReader(Thread):
-    """Outputs periodic stats info"""
+    """Polls redis queue for messages, writes batches to msgQueue for worker consumption"""
     def __init__(self):
         Thread.__init__(self)
         self.daemon = True
         self.running = True
 
-    # Pops message batches from Redis and enqueues into 'msgQueue'.
     def run(self):
         log.info("Redis Reader Task Started")
         while self.running:
@@ -156,8 +145,7 @@ class RedisReader(Thread):
                     msgQueue.put(batch)
                     statsQueue.put(len(batch))
                 else:
-                    # Sleep if Redis list is empty to avoid
-                    # burning cycles. Save money. See world.
+                    # Sleep if Redis list is empty to avoid burning cycles.
                     time.sleep(3)
             except Exception:
                 log.warn("Failed to poll Redis")
@@ -167,8 +155,8 @@ class RedisReader(Thread):
             self.running = False
             log.info("Redis Reader Task Stopping")
 
-    # Ensure Redis can be pinged.
     def try_redis_connection(self):
+        """Retry Redis PING command if Redis is unreachable"""
         while True:
             try:
                 redis_conn.ping()
@@ -180,7 +168,7 @@ class RedisReader(Thread):
 
 
 class Blacklister(Thread):
-    """Syncs blacklist rules with Redis"""
+    """Syncs blacklist rules with Redis and propagates to workers"""
     def __init__(self, queues):
         Thread.__init__(self)
         self.daemon = True
@@ -198,23 +186,23 @@ class Blacklister(Thread):
     @classmethod
     def fetch_blacklist(self):
         blacklist_update = {}
-        # What rule keys exist?
+        # What rule keys exist in Redis?
         try:
             blacklist_keys = redis_conn.smembers('blacklist')
         except Exception:
             log.warn("Redis unreachable, retrying in %ds" % redis_retry)
             time.sleep(redis_retry)
-        # Build map.        
+        # Get each rule KV and build map.        
         for i in blacklist_keys:
             k = i.decode('utf-8')
             get = redis_conn.get(k)
             if get == None:
-                # Rule key was likely expired, remove from blacklist set.
+                # If Rule key value is None, it was likely expired - remove it from blacklist set.
                 redis_conn.srem('blacklist', k)
             else:
                 kv = get.decode('utf-8').split(':')
-                # Create blacklist key for rule field if it doesn't exist,
-                # or append to existing.
+                # Create a key in the blacklist map for the rule KV pair found in Redis,
+                # or, append to existing.
                 if not kv[0] in blacklist_update:
                     blacklist_update[kv[0]] = []
                     blacklist_update[kv[0]].append(kv[1])
@@ -224,7 +212,7 @@ class Blacklister(Thread):
 
 
 class Alerter(Thread):
-    """Receives event triggers and handles alerts"""
+    """Receives event triggers from outputs.alertQueue, handles writing alerts"""
     def __init__(self):
         Thread.__init__(self)
         self.daemon = True
@@ -244,7 +232,7 @@ class Alerter(Thread):
 
  
 class Statser(Thread):
-    """Outputs periodic stats info"""
+    """Outputs periodic Occam stats info"""
     def __init__(self):
         Thread.__init__(self)
         self.daemon = True
@@ -259,17 +247,16 @@ class Statser(Thread):
                 else:
                     time.sleep(0.25)
             if count_current > count_previous:
-                # We divide by the actual duration because
-                # thread scheduling / run time can't be trusted.
+                # We divide by the actual duration because thread scheduling /
+                # wall time vs. execution time can't be trusted.
                 duration = time.time() - stop + 5
                 log.info("Last %.1fs: polled %.2f messages/sec." % (duration, count_current / duration))
             count_previous = count_current = 0
 
 
-# REST API 
-# Init. This for real needs to be significantly better.
+# REST API: this for real needs to be significantly better.
 class Api(Thread):
-    """Outputs periodic stats info"""
+    """Dumps Occam service and blacklist info, accepts blacklist requests"""
     def __init__(self):
         Thread.__init__(self)
         self.daemon = True
@@ -296,7 +283,6 @@ class ApiCalls(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == '/':
-            # Do stuff.
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length).decode('utf-8')
             # Handle request.
@@ -308,7 +294,7 @@ class ApiCalls(BaseHTTPRequestHandler):
                 outage_id = hashlib.sha1(str(outage_meta[:2]).encode()).hexdigest()
                 outage_expires = int(outage_meta[2]) * 3600
                 outage_kv = str(outage_meta[0] + ':' + outage_meta[1])
-                # Set outage.
+                # Update outage in Redis.
                 redis_conn.setex(outage_id, outage_expires, outage_kv)
                 redis_conn.sadd('blacklist', outage_id)
                 # Send response.
@@ -318,7 +304,6 @@ class ApiCalls(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         if self.path == '/':
-            # Do stuff.
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length).decode('utf-8')
             # Handle request.
@@ -328,7 +313,7 @@ class ApiCalls(BaseHTTPRequestHandler):
                   (outage_meta[0], outage_meta[1]))
                 # Generate outage key data.
                 outage_id = hashlib.sha1(str(outage_meta[:2]).encode()).hexdigest()
-                # Set outage.
+                # Update outage in Redis.
                 redis_conn.delete(outage_id)
                 # Send response.
                 self.wfile.write(bytes("Request Received - DELETE: " + post_data + "\n", "utf-8"))
@@ -344,7 +329,7 @@ if __name__ == "__main__":
     n = 1 if multiprocessing.cpu_count() == 1 else max(multiprocessing.cpu_count()-1, 2)
 
     # Initialize Matcher workers and queues.
-    # Append queues to list that's fed to the blacklister thread.
+    # Append queues to list that's fed to the blacklister thread for rule propagation.
     blacklist_queues = []
     workers = []
     for i in range(n):
@@ -355,7 +340,8 @@ if __name__ == "__main__":
         worker.start()
 
     time.sleep(0.5)
-    # Start general task threads worker.
+
+    # Start general task threads handler process.
     tasks = Tasks()
     tasks.start()
 
@@ -365,9 +351,7 @@ if __name__ == "__main__":
     # Sit-n-spin.
     try:
         # Avoiding adding communication to worker processes
-        # to ensure initial blacklist sync occurred, instead
-        # we wait for the first 'blacklister()' thread sync event
-        # and sleep for 5 seconds. 
+        # to ensure initial blacklist sync occurred, instead, we're being lazy.
         log.info("Waiting for Blacklist Rules sync")
         time.sleep(1)
         # Then start main Redis reader task.
@@ -379,7 +363,7 @@ if __name__ == "__main__":
         time.sleep(1)
         while True:
             if not msgQueue.empty():
-                log.info("Waiting for in-flight messages")
+                log.info("Waiting for In-Flight Messages")
                 time.sleep(3)
             else:
                 for i in workers: i.stop()
