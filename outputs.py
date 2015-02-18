@@ -1,17 +1,60 @@
-import json, requests
+import json
+import multiprocessing
+import requests
 
-from occam import log, handler
-from occam import config
+from log import log
 
-log.removeHandler(handler)
+
+alertsQueue = multiprocessing.Queue()
+
 
 def outConsole(message):
-    """Writes to console."""
-    log.info("Event Match: %s" % message)
+    """Writes message to console"""
+    alertsQueue.put(("outConsole", message)) 
 
 def outPd(message, service_alias, incident_key=None):
-    """Writes to PagerDuty."""
+    """Writes message to PagerDuty"""
+    alertsQueue.put(("outPd", message, service_alias, incident_key))
+    
+def outHc(message, hc_meta):
+    """Writes message to HipChat"""
+    alertsQueue.put(("outHc", message, hc_meta))
+
+
+################
+# OUTPUT LOGIC #
+################
+
+def outConsoleHandler(meta):
+    message = meta[1]
     log.info("Event Match: %s" % message)
+
+def outHcHandler(meta, config):
+    message, hc_meta = meta[1:]
+    log.info("Event Match: %s" % message)
+
+    hc = config['hipchat'][hc_meta].split("_")
+    url = "https://api.hipchat.com/v2/room/" + hc[0] + "/notification"
+
+    notification = {
+      "message": "<b>Occam Alert</b><br>" + json.dumps(message),
+      "message_format": "html"
+    }
+    # Ship.
+    resp = requests.post(url,
+      data=json.dumps(notification),
+      params={'auth_token': hc[1]},
+      headers={'content-type': 'application/json'})
+    if resp.status_code != (200|204):
+        log.warn("Error sending to HipChat: %s" % resp.content.decode('utf-8'))
+    else:
+        log.info("Message sent to HipChat")
+
+
+def outPdHandler(meta, config):
+    message, service_alias, incident_key = meta[1:]
+    log.info("Event Match: %s" % message)
+
     service_key = config['pagerduty'][service_alias]
     url = "https://events.pagerduty.com/generic/2010-04-15/create_event.json"
     alert = {
@@ -34,25 +77,3 @@ def outPd(message, service_alias, incident_key=None):
         log.warn("Error sending to PagerDuty: %s" % resp.content.decode('utf-8'))
     else:
         log.info("Message sent to PagerDuty: %s" % resp.content.decode('utf-8'))
-
-def outHc(message, hc_meta):
-    """Writes to HipChat."""
-    log.info("Event Match: %s" % message)
-
-    hc = config['hipchat'][hc_meta].split("_")
-    url = "https://api.hipchat.com/v2/room/" + hc[0] + "/notification"
-
-    notification = {
-      "message": "<b>Occam Alert</b><br>" + json.dumps(message),
-      "message_format": "html"
-    }
-    # Ship.
-    resp = requests.post(url,
-      data=json.dumps(notification),
-      params={'auth_token': hc[1]},
-      headers={'content-type': 'application/json'})
-    if resp.status_code != (200|204):
-        log.warn("Error sending to HipChat: %s" % resp.content.decode('utf-8'))
-    else:
-        log.info("Message sent to HipChat")
-
