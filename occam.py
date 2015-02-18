@@ -224,9 +224,9 @@ class Alerter(Thread):
                 if alertMeta[0] == "outConsole":
                     outputs.outConsoleHandler(alertMeta)
                 elif alertMeta[0] == "outHc":
-                    self.outHcHandler(alertMeta)
+                    outputs.outHcHandler(alertMeta, config)
                 elif alertMeta[0] == "outPd": 
-                    self.outPdHandler(alertMeta)
+                    outputs.outPdHandler(alertMeta, config)
             else:
                 time.sleep(1)
 

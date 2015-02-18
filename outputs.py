@@ -1,3 +1,4 @@
+import json
 import multiprocessing
 import requests
 
@@ -20,19 +21,17 @@ def outHc(message, hc_meta):
     alertsQueue.put(("outHc", message, hc_meta))
 
 
-def outConsoleHandler(meta):
-    message = meta[1]
-    log.info("Event Match: %s" % message)
-
-
 ################
 # OUTPUT LOGIC #
 ################
 
-def outHcHandler(meta):
+def outConsoleHandler(meta):
+    message = meta[1]
     log.info("Event Match: %s" % message)
 
+def outHcHandler(meta, config):
     message, hc_meta = meta[1:]
+    log.info("Event Match: %s" % message)
 
     hc = config['hipchat'][hc_meta].split("_")
     url = "https://api.hipchat.com/v2/room/" + hc[0] + "/notification"
@@ -52,10 +51,9 @@ def outHcHandler(meta):
         log.info("Message sent to HipChat")
 
 
-def outPdHandler(meta):
-    log.info("Event Match: %s" % message)
-
+def outPdHandler(meta, config):
     message, service_alias, incident_key = meta[1:]
+    log.info("Event Match: %s" % message)
 
     service_key = config['pagerduty'][service_alias]
     url = "https://events.pagerduty.com/generic/2010-04-15/create_event.json"
