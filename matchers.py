@@ -33,6 +33,7 @@ def inRate(threshold, window, key=None, uid=None):
     now = time.time()
     redis_conn.zadd(uid, now, now)
     if redis_conn.zcard(uid) >= threshold:
+        redis_conn.delete(uid)
         return True
     return False
 

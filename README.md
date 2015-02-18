@@ -72,7 +72,7 @@ if inRegex(msg, "somefield", ".*")
 ```
 
 #### inRate
-Rolling window rate check. Anchor function that is placed within a series of conditionals that requires a threshold of all preceding conditions to have been met '5' times within a '30' second rolling window, otherwise, the chain of conditions will be short-circuited.
+Time window rate check. Anchor function that is placed within a series of conditionals that requires a threshold of all preceding conditions to have been met '5' times within a '30' second window, otherwise, the chain of conditions will be short-circuited.
 ```python
 inRate(5, 30)
 ```
@@ -82,7 +82,7 @@ if inMatch(msg, "somefield", "somevalue") and inRate(5, 30): outConsole(msg)
 ```
 
 #### inRateKeyed
-Rolling window rate check that dynamically generates seperate rate checks based on the value of a given message field.
+Time window rate check that dynamically generates seperate rate checks based on the value of a given message field.
 
 ```python
 inRateKeyed(msg, "somefield", 5, 30)
