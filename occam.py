@@ -239,7 +239,9 @@ class Statser(Thread):
 
     def run(self):
         count_current = count_previous = 0
+
         while True:
+            # Handle rate stats.
             stop = time.time()+5
             while time.time() < stop:
                 if not statsQueue.empty():
@@ -250,8 +252,14 @@ class Statser(Thread):
                 # We divide by the actual duration because thread scheduling /
                 # wall time vs. execution time can't be trusted.
                 duration = time.time() - stop + 5
-                log.info("Last %.1fs: polled %.2f messages/sec." % (duration, count_current / duration))
+                rate = count_current / duration
+                log.info("Last %.1fs: polled %.2f messages/sec." % (duration, rate))
             count_previous = count_current = 0
+
+            # Handle alerts stats.
+            alerts_queue_length = outputs.alertsQueue.qsize()
+            if alerts_queue_length > 0:
+                log.info("Outbound alerts queue length: %d" % alerts_queue_length) 
 
 
 # REST API: this for real needs to be significantly better.
