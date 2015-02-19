@@ -279,7 +279,8 @@ class ApiCalls(BaseHTTPRequestHandler):
         if self.path == '/':
             # Response message.
             status = {
-              "Occam Start Time": start_time 
+              "Occam Start Time": start_time,
+              "Outbound Alerts Queue Length": outputs.alertsQueue.qsize()
             }
             # Build outage meta.
             blacklist = Blacklister.fetch_blacklist() 
