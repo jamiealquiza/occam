@@ -16,9 +16,9 @@ def outPd(message, service_alias, incident_key=None):
     """Writes message to PagerDuty"""
     alertsQueue.put(("outPd", message, service_alias, incident_key))
     
-def outHc(message, hc_meta):
+def outHc(message, hc_meta, notify=False):
     """Writes message to HipChat"""
-    alertsQueue.put(("outHc", message, hc_meta))
+    alertsQueue.put(("outHc", message, hc_meta, notify))
 
 
 ################
@@ -30,7 +30,7 @@ def outConsoleHandler(meta):
     log.info("Event Match: %s" % message)
 
 def outHcHandler(meta, config):
-    message, hc_meta = meta[1:]
+    message, hc_meta, notify = meta[1:]
     log.info("Event Match: %s" % message)
 
     hc = config['hipchat'][hc_meta].split("_")
@@ -38,7 +38,8 @@ def outHcHandler(meta, config):
 
     notification = {
       "message": "<b>Occam Alert</b><br>" + json.dumps(message),
-      "message_format": "html"
+      "message_format": "html",
+      "notify": notify
     }
     # Ship.
     resp = requests.post(url,
